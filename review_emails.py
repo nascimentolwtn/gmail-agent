@@ -23,19 +23,20 @@ def load_labels(service):
     user_labels = [l for l in labels if l["type"] == "user"]
     return {l["name"]: l["id"] for l in user_labels}
 
-def get_recent_labels(examples, top_n=9):
-    """Return the most frequently used labels from examples.json."""
+def get_recent_labels(examples, session_decisions=None, top_n=9):
+    """Return most frequently used labels from saved + current session."""
     counter = Counter()
-    for ex in examples:
+    all_decisions = examples + (session_decisions or [])
+    for ex in all_decisions:
         actions = ex["action"] if isinstance(ex["action"], list) else [ex["action"]]
         for a in actions:
             if a.startswith("tag:"):
                 counter[a[4:]] += 1
     return [label for label, _ in counter.most_common(top_n)]
 
-def pick_labels(label_map, examples):
+def pick_labels(label_map, examples, session_decisions=None):
     all_names = list(label_map.keys())
-    recent = get_recent_labels(examples)
+    recent = get_recent_labels(examples, session_decisions)
     selected = []
 
     while True:
@@ -107,7 +108,7 @@ def pick_labels(label_map, examples):
                 print("  Invalid — number, ENTER, f, or c.")
 
 def review_emails(service):
-    emails = get_unread_emails(service, max_results=100)
+    emails = get_unread_emails(service, max_results=50)
     label_map = load_labels(service)
     examples = load_examples()
 
@@ -148,7 +149,7 @@ def review_emails(service):
                 break
 
             elif cmd == "t":
-                chosen = pick_labels(label_map, examples)
+                chosen = pick_labels(label_map, examples, session_decisions)
                 if chosen:
                     decision = {
                         "from": email["from"],
