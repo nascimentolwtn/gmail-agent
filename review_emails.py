@@ -4,6 +4,7 @@ import os
 from collections import Counter
 from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails
+from suggest import suggest_action, format_suggestion
 
 EXAMPLES_FILE = "examples.json"
 
@@ -125,6 +126,14 @@ def review_emails(service):
         print(f"  From:    {email['from']}")
         print(f"  Subject: {email['subject']}")
         print(f"  Date:    {email['date']}")
+
+        # --- NEW: show LLM suggestion ---
+        if len(examples) + len(session_decisions) >= 10:
+            suggestion = suggest_action(email, examples + session_decisions, label_map)
+            print(f"\n  💡 Suggestion: {format_suggestion(suggestion)}")
+        else:
+            print(f"\n  💡 Suggestion: (needs 10+ examples first)")
+        # --------------------------------
 
         while True:
             cmd = input("\n  Action [d/t/s/q]: ").strip().lower()
