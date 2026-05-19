@@ -109,7 +109,7 @@ def pick_labels(label_map, examples, session_decisions=None):
                 print("  Invalid — number, ENTER, f, or c.")
 
 def review_emails(service):
-    emails = get_unread_emails(service, max_results=50)
+    emails, unreadable, total = get_unread_emails(service, max_results=50)
     label_map = load_labels(service)
     examples = load_examples()
 
@@ -181,6 +181,7 @@ def review_emails(service):
                 print("  Unknown command. Use d/t/s/q.")
 
     _save_session(examples, session_decisions)
+    print(f"Total unreadables = {unreadable}/{total} = {unreadable/total*100:.1f}%")
 
 def _save_session(examples, session_decisions):
     if session_decisions:
