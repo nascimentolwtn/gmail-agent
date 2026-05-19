@@ -1,5 +1,6 @@
 import json
 import base64
+import quopri
 from auth_test import get_gmail_service
 
 def get_unread_emails(service, max_results=50, body_chars=300):
@@ -11,62 +12,81 @@ def get_unread_emails(service, max_results=50, body_chars=300):
 
     messages = results.get("messages", [])
     emails = []
+    unreadable = 0
 
     for msg in messages:
         full = service.users().messages().get(
             userId="me",
             id=msg["id"],
-            format="full"  # Get full payload, not just metadata
+            format="full"
         ).execute()
 
         headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
 
-        # Extract the first 'body_chars' characters of each email body
-        def find_text_body(payload):
-            """Walk MIME tree to find text/plain body."""
-            # Leaf node with base64-encoded body data
-            if "data" in payload and len(payload["data"]) >= 10:
-                return payload["data"]
+        def find_text_part(payload):
+            """Walk MIME tree, return (data, encoding) for text/plain part."""
+            mime_type = payload.get("mimeType", "")
+            
+            # Leaf text/plain node
+            if mime_type == "text/plain":
+                body = payload.get("body", {})
+                data = body.get("data")
+                if data:
+                    # Read transfer encoding from part headers
+                    part_headers = {
+                        h["name"].lower(): h["value"]
+                        for h in payload.get("headers", [])
+                    }
+                    transfer_enc = part_headers.get("content-transfer-encoding", "base64").lower()
+                    return data, transfer_enc
 
-            # 'body' field can be a nested node for multipart/alternative messages
-            if "body" in payload:
-                body_val = payload["body"]
-                if isinstance(body_val, dict) and "data" in body_val:
-                    return find_text_body(body_val)
-
-            if "parts" not in payload:
-                return None
-
-            # Recurse into parts - multipart/alternative has exactly 2 parts
+            # Recurse into multipart/* parts
             for part in payload.get("parts", []):
-                result = find_text_body(part)
+                result = find_text_part(part)
                 if result is not None:
                     return result
+
             return None
 
-        body_data = find_text_body(full["payload"])
+        result = find_text_part(full["payload"])
 
-        if not body_data:
-            continue  # No text body found, skip this email
+        if not result:
+            unreadable += 1
+            continue
 
-        # Decode base64 and get first 'body_chars' chars
+        data, transfer_enc = result
+
         try:
-            full_body = base64.b64decode(body_data).decode('utf-8', errors='ignore')
-            body_snippet = full_body[:body_chars].strip()
-        except (ValueError, UnicodeDecodeError):
-            body_snippet = '[Binary/Unreadable MIME Part - skipping decode]'  # Binary attachment or corrupted base64; still include in results so user can tag/delete it
+            if transfer_enc in ("base64", ""):
+                # Gmail always delivers base64 with URL-safe alphabet
+                full_body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
+            elif transfer_enc == "quoted-printable":
+                # data is still base64-wrapped by Gmail; decode that first
+                raw = base64.urlsafe_b64decode(data + "==")
+                full_body = quopri.decodestring(raw).decode("utf-8", errors="ignore")
+            elif transfer_enc == "8bit" or transfer_enc == "7bit":
+                raw = base64.urlsafe_b64decode(data + "==")
+                full_body = raw.decode("utf-8", errors="ignore")
+            else:
+                full_body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
 
-        label_ids = full.get("labelIds", [])
+            body_snippet = full_body[:body_chars].strip()
+
+        except Exception as e:
+            body_snippet = f"[Decode error: {e}]"
+            unreadable += 1
 
         emails.append({
             "id": msg["id"],
             "from": headers.get("From", ""),
             "subject": headers.get("Subject", ""),
             "date": headers.get("Date", ""),
-            "body_snippet": body_snippet,  # First 150 chars of the email content
-            "labels": label_ids
+            "body_snippet": body_snippet,
+            "labels": full.get("labelIds", [])
         })
 
+    total = len(messages)
+    print(f"Total unreadables = {unreadable} / {total} = {unreadable/total*100:.1f}%")
     return emails
 
 if __name__ == "__main__":
