@@ -123,9 +123,13 @@ def review_emails(service):
 
     for i, email in enumerate(emails):
         print(f"\n[{i+1}/{len(emails)}]")
-        print(f"  From:    {email['from']}")
-        print(f"  Subject: {email['subject']}")
-        print(f"  Date:    {email['date']}")
+        print(f"  From:         {email['from']}")
+        print(f"  Subject:      {email['subject']}")
+        body_snippet = email.get('body_snippet', '')[:60].replace('\n', ' ')
+        if len(body_snippet) > 60:
+            body_snippet += "..."
+        print(f"  Body snippet: {repr(body_snippet)}")
+        print(f"  Date:         {email['date']}")
 
         # --- NEW: show LLM suggestion ---
         if len(examples) + len(session_decisions) >= 10:
@@ -151,6 +155,7 @@ def review_emails(service):
                 decision = {
                     "from": email["from"],
                     "subject": email["subject"],
+                    "body_snippet": body_snippet,
                     "action": "delete"
                 }
                 session_decisions.append(decision)
@@ -163,6 +168,7 @@ def review_emails(service):
                     decision = {
                         "from": email["from"],
                         "subject": email["subject"],
+                        "body_snippet": body_snippet,
                         "action": [f"tag:{l}" for l in chosen]
                     }
                     session_decisions.append(decision)

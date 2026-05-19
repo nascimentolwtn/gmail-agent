@@ -1,6 +1,4 @@
-from atexit import unregister
 import re
-import json
 import base64
 import quopri
 from auth_test import get_gmail_service
@@ -102,7 +100,7 @@ def strip_html(html):
 
 if __name__ == "__main__":
     service = get_gmail_service()
-    emails, unreadable, total = get_unread_emails(service, max_results=50)
+    emails, unreadable, total = get_unread_emails(service, max_results=100, body_chars=200)
 
     for i, email in enumerate(emails):
         print(f"\n[{i+1}] From:             {email['from']}")
