@@ -1,4 +1,5 @@
 from atexit import unregister
+import re
 import json
 import base64
 import quopri
@@ -24,68 +25,25 @@ def get_unread_emails(service, max_results=50, body_chars=300):
 
         headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
 
-        def find_text_part(payload):
-            """Walk MIME tree, return (data, encoding) for text/plain part."""
-            mime_type = payload.get("mimeType", "")
-            
-            # Leaf text/plain node
-            if mime_type == "text/plain":
-                body = payload.get("body", {})
-                data = body.get("data")
-                if data:
-                    # Read transfer encoding from part headers
-                    part_headers = {
-                        h["name"].lower(): h["value"]
-                        for h in payload.get("headers", [])
-                    }
-                    transfer_enc = part_headers.get("content-transfer-encoding", "base64").lower()
-                    return data, transfer_enc
-
-            # Recurse into multipart/* parts
-            for part in payload.get("parts", []):
-                result = find_text_part(part)
-                if result is not None:
-                    return result
-
-            return None
-
         result = find_text_part(full["payload"])
 
         if not result:
-            unreadable += 1
-
-            # Still append emails, but with raw preview in the body_snippet
-            emails.append({
-                "id": msg["id"],
-                "from": headers.get("From", ""),
-                "subject": headers.get("Subject", ""),
-                "date": headers.get("Date", ""),
-                "body_snippet": f"Raw preview:\n\t{headers}\n\tdata={repr(result)[:10]}",
-                "labels": full.get("labelIds", [])
-            })
-            continue
-
-        data, transfer_enc = result
-
-        try:
-            if transfer_enc in ("base64", ""):
-                # Gmail always delivers base64 with URL-safe alphabet
-                full_body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
-            elif transfer_enc == "quoted-printable":
-                # data is still base64-wrapped by Gmail; decode that first
-                raw = base64.urlsafe_b64decode(data + "==")
-                full_body = quopri.decodestring(raw).decode("utf-8", errors="ignore")
-            elif transfer_enc == "8bit" or transfer_enc == "7bit":
-                raw = base64.urlsafe_b64decode(data + "==")
-                full_body = raw.decode("utf-8", errors="ignore")
+            # Last resort: use Gmail's own pre-extracted snippet
+            snippet = full.get("snippet", "").strip()
+            if snippet:
+                body_snippet = snippet[:body_chars]
             else:
-                full_body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
-
-            body_snippet = full_body[:body_chars].strip()
-
-        except Exception as e:
-            body_snippet = f"[Decode error: {e}]"
-            unreadable += 1
+                unreadable += 1
+                continue
+        else:
+            data, transfer_enc, mime_type = result
+            try:
+                full_body = decode_part(data, transfer_enc)
+                if mime_type == "text/html":
+                    full_body = strip_html(full_body)
+                body_snippet = full_body[:body_chars].strip()
+            except Exception as e:
+                body_snippet = full.get("snippet", f"[Decode error: {e}]")[:body_chars]
 
         emails.append({
             "id": msg["id"],
@@ -98,6 +56,49 @@ def get_unread_emails(service, max_results=50, body_chars=300):
 
     total = len(messages)
     return emails, unreadable, total
+
+
+def find_text_part(payload, preferred="text/plain"):
+    """Walk MIME tree. Returns (data, transfer_enc, mime_type) or None."""
+    mime_type = payload.get("mimeType", "")
+
+    if mime_type in ("text/plain", "text/html"):
+        body = payload.get("body", {})
+        data = body.get("data")
+        if data:
+            part_headers = {
+                h["name"].lower(): h["value"]
+                for h in payload.get("headers", [])
+            }
+            transfer_enc = part_headers.get("content-transfer-encoding", "base64").lower()
+            return data, transfer_enc, mime_type
+
+    for part in payload.get("parts", []):
+        result = find_text_part(part, preferred)
+        if result is not None:
+            return result
+
+    return None
+
+
+def decode_part(data, transfer_enc):
+    raw = base64.urlsafe_b64decode(data + "==")
+    if transfer_enc == "quoted-printable":
+        return quopri.decodestring(raw).decode("utf-8", errors="ignore")
+    return raw.decode("utf-8", errors="ignore")
+
+
+def strip_html(html):
+    """Minimal HTML to plain text."""
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.DOTALL)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&zwnj;", "", text)
+    text = re.sub(r"&[a-zA-Z]+;", " ", text)  # other HTML entities
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
 
 if __name__ == "__main__":
     service = get_gmail_service()
