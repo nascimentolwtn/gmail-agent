@@ -1,3 +1,4 @@
+from atexit import unregister
 import json
 import base64
 import quopri
@@ -52,6 +53,16 @@ def get_unread_emails(service, max_results=50, body_chars=300):
 
         if not result:
             unreadable += 1
+
+            # Still append emails, but with raw preview in the body_snippet
+            emails.append({
+                "id": msg["id"],
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", ""),
+                "date": headers.get("Date", ""),
+                "body_snippet": f"Raw preview:\n\t{headers}\n\tdata={repr(result)[:10]}",
+                "labels": full.get("labelIds", [])
+            })
             continue
 
         data, transfer_enc = result
@@ -86,12 +97,11 @@ def get_unread_emails(service, max_results=50, body_chars=300):
         })
 
     total = len(messages)
-    print(f"Total unreadables = {unreadable} / {total} = {unreadable/total*100:.1f}%")
-    return emails
+    return emails, unreadable, total
 
 if __name__ == "__main__":
     service = get_gmail_service()
-    emails = get_unread_emails(service, max_results=10)
+    emails, unreadable, total = get_unread_emails(service, max_results=50)
 
     for i, email in enumerate(emails):
         print(f"\n[{i+1}] From:             {email['from']}")
@@ -99,3 +109,5 @@ if __name__ == "__main__":
         print(f"     Body snippet:  {repr(email['body_snippet'])}")
         print(f"     Date:          {email['date']}")
         print(f"     Labels:        {email['labels']}")
+
+    print(f"Total unreadables = {unreadable}/{total} = {unreadable/total*100:.1f}%")
