@@ -54,7 +54,7 @@ def get_unread_emails(service, max_results=50, body_chars=300):
             full_body = base64.b64decode(body_data).decode('utf-8', errors='ignore')
             body_snippet = full_body[:body_chars].strip()
         except (ValueError, UnicodeDecodeError):
-            continue
+            body_snippet = '[Binary/Unreadable MIME Part - skipping decode]'  # Binary attachment or corrupted base64; still include in results so user can tag/delete it
 
         label_ids = full.get("labelIds", [])
 
@@ -79,33 +79,3 @@ if __name__ == "__main__":
         print(f"     Body snippet:  {repr(email['body_snippet'])}")
         print(f"     Date:          {email['date']}")
         print(f"     Labels:        {email['labels']}")
-
-    # Debug dump the first email's full payload structure (first 50 levels)
-    if emails:
-        print("\n--- DEBUG: Full payload for first email ---")
-        def dump_payload(payload, indent=0):
-            prefix = "  " * indent
-            item = payload or {}
-            has_body = isinstance(item.get("data"), str)
-            key = "body" if has_body else ("parts" if "parts" in item else None)
-
-            print(f"{prefix}has_body={has_body}, has_parts={'yes' if 'parts' in item else 'no'}")
-            print(f"{prefix}  mimeType={item.get('mimeType')!r}")
-            if has_body:
-                data = item["data"][:50]
-                print(f"{prefix}  data (base64)={data}")
-
-            # Walk all parts recursively, showing first few of each type
-            for i, part in enumerate(item.get("parts", []), start=1):
-                dump_payload(part, indent + 2)
-
-        msg_data = emails[0]["id"]
-        raw = service.users().messages().list(userId="me", maxResults=1).execute()["messages"]
-        if not raw:
-            print("[ERROR] No messages found!")
-        else:
-            payload = service.users().messages().get(
-                userId="me", id=raw[0]["id"], format="full"
-            ).execute()["payload"]
-
-            dump_payload(payload, indent=0)
