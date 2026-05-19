@@ -15,8 +15,8 @@ def build_system_prompt(examples, label_map):
     # pick up to 40 most recent examples to keep prompt size reasonable
     recent = examples[-40:]
     examples_text = json.dumps(recent, ensure_ascii=False, indent=2)
-
-    return f"""You are an email categorization assistant. Your job is to suggest actions for incoming emails based on the user's past decisions.
+    return f"""/no_think
+        You are an email categorization assistant. Your job is to suggest actions for incoming emails based on the user's past decisions.
 
 AVAILABLE LABELS (use exactly these names):
 {labels_list}
@@ -33,20 +33,18 @@ RULES:
 """
 
 def suggest_action(email, examples, label_map):
-    """Ask local LLM to suggest an action for a single email."""
     system_prompt = build_system_prompt(examples, label_map)
 
-    user_message = f"""Suggest an action for this email:
+    user_message = f"""/no_think Suggest an action for this email and reply with JSON only.
 
 From: {email['from']}
 Subject: {email['subject']}
-Date: {email['date']}
-
-Reply with JSON only."""
+Date: {email['date']}"""
 
     payload = {
         "model": "local",
-        "max_tokens": 100,
+        "max_tokens": 2048,        # enough for thinking + text block
+        "thinking": {"type": "disabled"},   # llama.cpp flag — ignored if unsupported
         "system": system_prompt,
         "messages": [
             {"role": "user", "content": user_message}
@@ -58,63 +56,49 @@ Reply with JSON only."""
             LLAMA_URL,
             json=payload,
             headers={"x-api-key": "local"},
-            timeout=30
+            timeout=60        # more time for thinking models
         )
         response.raise_for_status()
         data = response.json()
 
-        # debug: uncomment if still failing
-        # import pprint; pprint.pprint(data)
-
-        # extract text — handle Anthropic and OpenAI response formats
         raw = None
-        # extract text — Anthropic format
         if "content" in data:
             content = data["content"]
             if isinstance(content, list):
+                # first pass: look for explicit text block
                 for block in content:
                     if isinstance(block, dict):
-                        # try "text" key directly (some llama.cpp versions)
-                        if "text" in block:
+                        if block.get("type") == "text" and "text" in block:
                             raw = block["text"]
                             break
-                        # standard Anthropic type/text block
-                        elif block.get("type") == "text":
-                            raw = block["text"]
-                            break
-                    elif isinstance(block, str):
-                        raw = block
-                        break
+                # second pass: any block with a text key (not thinking)
+                if raw is None:
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") != "thinking":
+                            if "text" in block:
+                                raw = block["text"]
+                                break
+                # debug: show full content if still nothing
+                if raw is None:
+                    import pprint
+                    print("\n  [DEBUG] Full content blocks:")
+                    pprint.pprint(content)
             elif isinstance(content, str):
                 raw = content
-
         elif "choices" in data:
             raw = data["choices"][0]["message"]["content"]
 
         if raw is None:
-            # last resort debug — print full first content block
-            import pprint
-            pprint.pprint(data.get("content"))
-            return {"action": None, "error": "could not extract text"}
-
-        elif "choices" in data:
-            # OpenAI format: {"choices": [{"message": {"content": "..."}}]}
-            raw = data["choices"][0]["message"]["content"]
-
-        if raw is None:
-            return {"action": None, "error": f"unrecognized response format: {list(data.keys())}"}
+            return {"action": None, "error": "no text block in response"}
 
         raw = raw.strip()
-
-        # strip markdown fences if model adds them
         if "```" in raw:
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
 
-        suggestion = json.loads(raw)
-        return suggestion
+        return json.loads(raw)
 
     except requests.exceptions.Timeout:
         return {"action": None, "error": "timeout"}
@@ -122,7 +106,6 @@ Reply with JSON only."""
         return {"action": None, "error": f"bad json: {raw}"}
     except Exception as e:
         return {"action": None, "error": str(e)}
-
 
 def format_suggestion(suggestion):
     """Human-readable suggestion string."""
