@@ -88,11 +88,11 @@ def extract_user_labels(examples: list[dict]) -> Counter[str]:
 def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict) -> Optional[list[str]]:
     """Ask a small LLM to decide the best tag(s) given current email and top-k past decisions."""
 
-    if not LLAMA_URL or not re.match(r"^http://\d+:\d+", LLAMA_URL):
+    if not LLAMA_URL or not re.match(r"^http://[\w.]+:\d+", LLAMA_URL):
         # no LLM available — just return empty, caller decides what to do with "auto" mode
         return []
 
-    labels_list = ", ".join(label_map.keys())[:400]  # keep prompt under model's context limit
+    labels_list = ", ".join(label_map.keys())[:400] if label_map else ""  # keep prompt under model's context limit
 
     # pick up to ~25 most-recent decisions that were *tagged* (not deleted) — they are the strongest signal
     tagged: list[dict] = [
@@ -102,20 +102,22 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
 
     # compute a few features to feed into the LLM system prompt so it can be more consistent:
     freq_labels = extract_user_labels(examples)
-    recent = [label_map.get(l, l) for l in list(freq_labels.most_common(8)) if l.lower() in label_map]
+    recent = [label_map.get(l, l) for l, _ in freq_labels.most_common(8) if label_map and l.lower() in label_map]
 
-    # build a short "style" string the model uses as a few-shot reference (top 4 labels by frequency)
-    style_ref: str = ""
-    if freq_labels and recent:
-        top_n = min(len(recent), 4)
-        style_ref = f"  Recent user interest in:\n    • {', '.join(recent[:top_n])}\n\n"
+    # pick up to ~15 most-recent tagged decisions as few-shot examples
+    tagged_examples = [
+        ex for ex in examples[-60:]
+        if isinstance(ex.get("action"), (list, str)) and ex["action"]
+    ][:15]
+    examples_text = json.dumps(tagged_examples, ensure_ascii=False, indent=2) if tagged_examples else ""
 
     # compose system prompt — teaches model what output format to emit, e.g. {"labels":[...]}" or null
     system_prompt: str = (
         "/no_think\n"
         f"You are an email tagger that uses few-shot reasoning based on the user's labeled examples.\n"
-        f"  Available labels:\n{labels_list}\n\n" + style_ref +
-        "  RULES:\n"
+        f"  Available labels:\n{labels_list}\n\n"
+        + (f"  Past decisions (learn the pattern from these):\n{examples_text}\n\n" if examples_text else "")
+        + "  RULES:\n"
         "  • Return ONLY valid JSON — no explanation, no markdown code fences\n"
         '  • Format: {"labels":[...]} OR null (use null if delete or uncertain)\n'
     )
@@ -141,6 +143,8 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
 
     try:
         import requests; r = requests.post(LLAMA_URL, json=payload, headers={"x-api-key": "local"})
+        print(f"DEBUG pick_labels_from_prompt -> status={r.status_code}, url={LLAMA_URL}")  # noqa: T201
+
         data = r.json()  # type: ignore[union-attr]
         raw_text = None
         if isinstance(data.get("content"), list):
@@ -155,13 +159,81 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
             return []
 
         out = json.loads(raw_text)   # we expect {"labels": [...] } or null
-    except Exception as e:  # noqa: PERF203, try/except on LLM call — caller handles "no model" gracefully
-        pass
+    except Exception:  # noqa: PERF203, try/except on LLM call — caller handles "no model" gracefully
+        return []
 
     if isinstance(out, list):
         return []
     if out is None:
         return []   # signal to delete / skip instead of tag
+    if isinstance(out, dict):
+        return out.get("labels", [])
+    return []
+
+
+def _rule_based_tag(msg: dict, examples: list[dict]) -> Optional[list[str]]:
+    """Fallback: match email against examples using from/subject/label keyword overlap."""
+    from_field = (msg.get("from_field") or msg.get("from", "")).lower()
+    subject = (msg.get("subject", "") or "").lower()
+    text = f"{from_field} {subject}"
+
+    # score each example by keyword overlap with the incoming email
+    best_action = None
+    best_score = 0
+
+    for ex in examples:
+        ex_from = (ex.get("from", "") or "").lower()
+        ex_subj = (ex.get("subject", "") or "").lower()
+
+        score = 0
+        # strong signal: sender domain/name matches
+        if ex_from and (ex_from in from_field or from_field in ex_from):
+            score += 10
+        # medium signal: subject keyword overlap
+        if ex_subj:
+            ex_words = set(re.findall(r"\w+", ex_subj))
+            msg_words = set(re.findall(r"\w+", subject))
+            overlap = len(ex_words & msg_words)
+            score += overlap
+        # weak signal: label name keywords appear in email text
+        # e.g. label "Família/Crianças" → check for "family" in subject
+        ex_action = ex.get("action", [])
+        if isinstance(ex_action, str):
+            ex_action = [ex_action]
+        if isinstance(ex_action, list):
+            for a in ex_action:
+                m = re.match(r"^tag:(.+)$", str(a))
+                if m:
+                    label_words = set(re.findall(r"\w+", m.group(1).lower()))
+                    # ascii-fold for matching: "familia" ≈ "family"
+                    label_ascii = {w.translate(str.maketrans("àáâãäåèéêëìíîïòóôõöùúûüýÿñç",
+                                                            "aaaaaaeeeeiiiiooooouuuuyync")) for w in label_words}
+                    text_ascii = set(re.findall(r"\w+", text.translate(
+                        str.maketrans("àáâãäåèéêëìíîïòóôõöùúûüýÿñç",
+                                      "aaaaaaeeeeiiiiooooouuuuyync"))))
+                    if label_ascii & text_ascii:
+                        score += 3
+
+        if score > best_score:
+            best_score = score
+            best_action = ex.get("action")
+
+    if best_action is None or best_score == 0:
+        return None
+
+    # normalise action → list of label strings (without "tag:" prefix)
+    if isinstance(best_action, str):
+        best_action = [best_action]
+    if isinstance(best_action, list):
+        labels = []
+        for a in best_action:
+            if isinstance(a, str) and a.lower() == "delete":
+                return ["delete"]
+            m = re.match(r"^tag:(.+)$", str(a))
+            if m:
+                labels.append(m.group(1))
+        return labels or None
+    return None
 
 
 def auto_tag_email(
@@ -177,12 +249,25 @@ def auto_tag_email(
     else:
         labels = pick_labels_from_prompt(msg, examples, label_map)
 
+    # fall back to rule-based matching when LLM is unavailable
+    if not labels:
+        labels = _rule_based_tag(msg, examples)
+
     if not labels:
         return EmailDecision(
             from_field=msg.get("from", "")[:200],
             subject=msg.get("subject", "")[:400].replace("\n", " "),
             snippet=msg.get("snippet", ""),
             action=None,
+        )
+
+    # handle delete
+    if labels == ["delete"] or labels == "delete":
+        return EmailDecision(
+            from_field=msg.get("from", "")[:200],
+            subject=msg.get("subject", "")[:400].replace("\n", " "),
+            snippet=msg.get("snippet", ""),
+            action="delete",
         )
 
     # strip "tag:" prefix if caller prefers raw names — callers of apply_decision() handle this

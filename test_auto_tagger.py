@@ -34,6 +34,7 @@ def run_demo(args=None):
         {"from": "Filipe Newsletter","subject": "Devs ficando \"burros\"",    "action": ["tag:InovaçãoTecnológica"]},
         {"from": "Avenue Security" , "subject": "Extrato mensal disponível",  "action": ["tag:Unibanco-Itaú/Investimentos/USA"]},
         {"from": "Kidslox",         "subject": "Multiple PIN attempts",        "action": ["tag:Família/Crianças"]},
+        {"from": "Google family",   "subject": "Family activity report",       "action": ["tag:Família/Crianças"]},
     ] * 7
 
     # ----------------------------------------------------------------------
@@ -65,12 +66,17 @@ def run_demo(args=None):
             "snippet": f"From: {from_addr}\nSubject: {subject[:200]}"[:60],
         }, examples=seed_examples)
 
-        result   = (decision.action or [None])[0] if decision.action else None    # type: ignore[union-attr,assignment]
-        expected = ("tag:" + expected_label) if isinstance(expected_label, str) else "delete"
+        # decision.action is either a string ("delete") or a list (["tag:LABEL"])
+        if isinstance(decision.action, list):
+            result = decision.action[0] if decision.action else None
+        else:
+            result = decision.action
 
-        passed  = bool(decision.action) and \
-                  not isinstance(result, list) and \
-                  (result == expected or result.lower() == expected.lower())
+        if expected_label == "delete":
+            passed = result == "delete"
+        else:
+            expected = "tag:" + expected_label
+            passed = bool(result) and (result == expected or result.lower() == expected.lower())
 
         all_passed &= passed
 
