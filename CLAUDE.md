@@ -41,3 +41,14 @@ Both [credentials.json](file:///home/lw_na/git/gmail-agent/credentials.json) and
 - **google-api-python-client**: Official Gmail API Python client
 - **google-auth-oauthlib**: OAuth 2.0 authorization flow helpers
 - **google-auth-httplib2**: HTTP transport for authentication
+
+### Claude Code with OpenRounter API - Test Results:
+  "model": "nvidia/nemotron-3-nano-30b-a3b:free",        only diff
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",     slow
+  "model": "deepseek/deepseek-v4-flash:free",            retries
+  "model": "qwen/qwen3-next-80b-a3b-instruct:free",      retries
+  "model": "openai/gpt-oss-20b:free",                    retries
+  "model": "qwen/qwen3-coder:free",                      retries
+  "model": "meta-llama/llama-3.3-70b-instruct:free",     retries
+  "model": "openrouter/owl-alpha",                       working, sometimes slow
+   
