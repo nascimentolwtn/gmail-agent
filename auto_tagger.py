@@ -85,8 +85,81 @@ def extract_user_labels(examples: list[dict]) -> Counter[str]:
     return counter
 
 
-def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict) -> Optional[list[str]]:
-    """Ask a small LLM to decide the best tag(s) given current email and top-k past decisions."""
+def _ascii_fold(text: str) -> str:
+    """Strip diacritics so 'Família' matches 'familia'."""
+    return text.translate(str.maketrans(
+        "àáâãäåèéêëìíîïòóôõöùúûüýÿñç",
+        "aaaaaaeeeeiiiiooooouuuuyync"))
+
+
+def _example_similarity_score(msg: dict, ex: dict) -> float:
+    """Score how similar an example is to the incoming email.
+
+    Signals (weighted):
+      +10  sender name match (exact or substring)
+      +5   sender domain match
+      +3   per shared subject keyword
+      +1   per shared body/snippet keyword
+    """
+    score = 0.0
+    msg_from = _ascii_fold((msg.get("from_field") or msg.get("from", "")).lower())
+    msg_subj = _ascii_fold((msg.get("subject", "") or "").lower())
+    msg_body = _ascii_fold((msg.get("snippet", "") or "").lower())
+
+    ex_from = _ascii_fold((ex.get("from", "") or "").lower())
+    ex_subj = _ascii_fold((ex.get("subject", "") or "").lower())
+    ex_body = _ascii_fold((ex.get("snippet", "") or ex.get("body_snippet", "") or "").lower())
+
+    # sender match
+    if ex_from and (ex_from in msg_from or msg_from in ex_from):
+        score += 10.0
+    else:
+        # domain match: extract @domain from sender
+        msg_domain = msg_from.split("@")[-1] if "@" in msg_from else ""
+        ex_domain = ex_from.split("@")[-1] if "@" in ex_from else ""
+        if msg_domain and msg_domain == ex_domain:
+            score += 5.0
+
+    # subject keyword overlap
+    if ex_subj and msg_subj:
+        ex_words = set(re.findall(r"\w+", ex_subj))
+        msg_words = set(re.findall(r"\w+", msg_subj))
+        score += 3.0 * len(ex_words & msg_words)
+
+    # body/snippet keyword overlap
+    if ex_body and msg_body:
+        ex_words = set(re.findall(r"\w+", ex_body))
+        msg_words = set(re.findall(r"\w+", msg_body))
+        score += 1.0 * len(ex_words & msg_words)
+
+    return score
+
+
+def _select_similar_examples(msg: dict, examples: list[dict], max_examples: int = 9) -> list[dict]:
+    """Pick the most similar examples to the incoming email by content overlap.
+
+    Scores every example on sender + subject + body similarity, then returns
+    the top *max_examples* (preserving original order for stable few-shot context).
+    """
+    if len(examples) <= max_examples:
+        return list(examples)
+
+    scored = [(ex, _example_similarity_score(msg, ex)) for ex in examples]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+
+    # take top-N, then re-sort by original position so the LLM sees chronological order
+    top = scored[:max_examples]
+    top_indices = {id(ex) for ex, _ in top}
+    return [ex for ex in examples if id(ex) in top_indices]
+
+
+def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict, max_examples: int = 9) -> Optional[list[str]]:
+    """Ask a small LLM to decide the best tag(s) given current email and similar past decisions.
+
+    Few-shot examples are selected by content similarity (sender + subject + body overlap).
+    The model sees what tags were applied to similar emails and *reasons* about whether
+    the same tags, a subset, or none (delete) should apply to the current email.
+    """
 
     if not LLAMA_URL or not re.match(r"^http://[\w.]+:\d+", LLAMA_URL):
         # no LLM available — just return empty, caller decides what to do with "auto" mode
@@ -94,29 +167,39 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
 
     labels_list = ", ".join(label_map.keys())[:400] if label_map else ""  # keep prompt under model's context limit
 
-    # pick up to ~25 most-recent decisions that were *tagged* (not deleted) — they are the strongest signal
-    tagged: list[dict] = [
-        {k: v for k, v in ex.items() if k != "action"}
-        for ex in examples[-100:]
-    ][:25]
+    # select the most *similar* examples instead of just the last N
+    similar_examples = _select_similar_examples(result, examples, max_examples=max_examples)
 
-    # compute a few features to feed into the LLM system prompt so it can be more consistent:
-    freq_labels = extract_user_labels(examples)
-    recent = [label_map.get(l, l) for l, _ in freq_labels.most_common(8) if label_map and l.lower() in label_map]
+    # build few-shot context — include sender, subject, body snippet, AND the action taken
+    # so the model can learn *why* certain tags were applied
+    few_shot_lines = []
+    for ex in similar_examples:
+        ex_from = ex.get("from", "")
+        ex_subj = ex.get("subject", "")
+        ex_snip = (ex.get("snippet", "") or ex.get("body_snippet", ""))[:120]
+        ex_action = ex.get("action", "")
+        if isinstance(ex_action, list):
+            ex_action = ", ".join(ex_action)
+        few_shot_lines.append(
+            f"  Email: From={ex_from!r}  Subject={ex_subj!r}\n"
+            f"  Snippet: {ex_snip!r}\n"
+            f"  → Action: {ex_action}"
+        )
+    examples_text = "\n\n".join(few_shot_lines) if few_shot_lines else ""
 
-    # pick up to ~15 most-recent tagged decisions as few-shot examples
-    tagged_examples = [
-        ex for ex in examples[-60:]
-        if isinstance(ex.get("action"), (list, str)) and ex["action"]
-    ][:15]
-    examples_text = json.dumps(tagged_examples, ensure_ascii=False, indent=2) if tagged_examples else ""
-
-    # compose system prompt — teaches model what output format to emit, e.g. {"labels":[...]}" or null
+    # compose system prompt — explicitly tell the model to *reason*, not just copy
     system_prompt: str = (
         "/no_think\n"
-        f"You are an email tagger that uses few-shot reasoning based on the user's labeled examples.\n"
-        f"  Available labels:\n{labels_list}\n\n"
-        + (f"  Past decisions (learn the pattern from these):\n{examples_text}\n\n" if examples_text else "")
+        "You are an email tagger. You will see the current email and several past\n"
+        "emails that are similar (same sender, similar subject/body). For each past\n"
+        "email you see what action was taken (which tags were applied, or delete).\n\n"
+        "Your job is to REASON about whether the same tags should apply to the\n"
+        "current email:\n"
+        "  - Apply ALL tags from a similar email if the content matches closely\n"
+        "  - Apply ONLY SOME tags if only part of the pattern matches\n"
+        "  - Return null (delete/skip) if the email is different enough\n\n"
+        + (f"  Similar past emails and their actions:\n{examples_text}\n\n" if examples_text else "")
+        + (f"  Available labels: {labels_list}\n\n" if labels_list else "")
         + "  RULES:\n"
         "  • Return ONLY valid JSON — no explanation, no markdown code fences\n"
         '  • Format: {"labels":[...]} OR null (use null if delete or uncertain)\n'
@@ -133,6 +216,12 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
     except Exception:
         pass
 
+    # if find_text_part didn't work, fall back to snippet
+    if not user_body:
+        snippet = (result.get("snippet", "") or "")[:900]
+        if snippet:
+            user_body = f"From / Subject:\n  {result.get('from_field', '')} | {result.get('subject', '').strip()}\n\nSnippet:\n{snippet}"
+
     payload: dict[str, any] = {
         "model": "local",
         "max_tokens": 512,       # we only need a JSON block, not long reasoning
@@ -143,7 +232,6 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
 
     try:
         import requests; r = requests.post(LLAMA_URL, json=payload, headers={"x-api-key": "local"})
-        print(f"DEBUG pick_labels_from_prompt -> status={r.status_code}, url={LLAMA_URL}")  # noqa: T201
 
         data = r.json()  # type: ignore[union-attr]
         raw_text = None
@@ -171,68 +259,53 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict)
     return []
 
 
-def _rule_based_tag(msg: dict, examples: list[dict]) -> Optional[list[str]]:
-    """Fallback: match email against examples using from/subject/label keyword overlap."""
-    from_field = (msg.get("from_field") or msg.get("from", "")).lower()
-    subject = (msg.get("subject", "") or "").lower()
-    text = f"{from_field} {subject}"
+def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> Optional[list[str]]:
+    """Fallback: aggregate actions from the top-N most similar examples.
 
-    # score each example by keyword overlap with the incoming email
-    best_action = None
-    best_score = 0
-
-    for ex in examples:
-        ex_from = (ex.get("from", "") or "").lower()
-        ex_subj = (ex.get("subject", "") or "").lower()
-
-        score = 0
-        # strong signal: sender domain/name matches
-        if ex_from and (ex_from in from_field or from_field in ex_from):
-            score += 10
-        # medium signal: subject keyword overlap
-        if ex_subj:
-            ex_words = set(re.findall(r"\w+", ex_subj))
-            msg_words = set(re.findall(r"\w+", subject))
-            overlap = len(ex_words & msg_words)
-            score += overlap
-        # weak signal: label name keywords appear in email text
-        # e.g. label "Família/Crianças" → check for "family" in subject
-        ex_action = ex.get("action", [])
-        if isinstance(ex_action, str):
-            ex_action = [ex_action]
-        if isinstance(ex_action, list):
-            for a in ex_action:
-                m = re.match(r"^tag:(.+)$", str(a))
-                if m:
-                    label_words = set(re.findall(r"\w+", m.group(1).lower()))
-                    # ascii-fold for matching: "familia" ≈ "family"
-                    label_ascii = {w.translate(str.maketrans("àáâãäåèéêëìíîïòóôõöùúûüýÿñç",
-                                                            "aaaaaaeeeeiiiiooooouuuuyync")) for w in label_words}
-                    text_ascii = set(re.findall(r"\w+", text.translate(
-                        str.maketrans("àáâãäåèéêëìíîïòóôõöùúûüýÿñç",
-                                      "aaaaaaeeeeiiiiooooouuuuyync"))))
-                    if label_ascii & text_ascii:
-                        score += 3
-
-        if score > best_score:
-            best_score = score
-            best_action = ex.get("action")
-
-    if best_action is None or best_score == 0:
+    Uses the same similarity scoring and selection as the LLM path, then picks
+    the highest-weighted action across the top matches. This approximates what
+    the LLM would reason about: if most similar emails were tagged "EngSW/LLM"
+    and a few were deleted, we tag as "EngSW/LLM".
+    """
+    if not examples:
         return None
 
-    # normalise action → list of label strings (without "tag:" prefix)
-    if isinstance(best_action, str):
-        best_action = [best_action]
-    if isinstance(best_action, list):
-        labels = []
-        for a in best_action:
-            if isinstance(a, str) and a.lower() == "delete":
-                return ["delete"]
-            m = re.match(r"^tag:(.+)$", str(a))
-            if m:
-                labels.append(m.group(1))
-        return labels or None
+    # get the top-N most similar examples (same selection as LLM path)
+    top_examples = _select_similar_examples(msg, examples, max_examples=max_examples)
+
+    # filter to examples with a positive similarity score
+    scored = [(ex, _example_similarity_score(msg, ex)) for ex in top_examples]
+    relevant = [(ex, s) for ex, s in scored if s > 0]
+
+    if not relevant:
+        return None
+
+    # weight each example's action by its similarity score
+    action_weights: dict[str, float] = {}
+    for ex, score in relevant:
+        action = ex.get("action", "")
+        if isinstance(action, str):
+            action = [action]
+        if isinstance(action, list):
+            for a in action:
+                a_str = str(a).strip()
+                if a_str:
+                    action_weights[a_str] = action_weights.get(a_str, 0) + score
+
+    if not action_weights:
+        return None
+
+    # pick the highest-weighted action
+    best_action = max(action_weights, key=action_weights.get)
+
+    # normalise → list of label strings (without "tag:" prefix)
+    if best_action.lower() == "delete":
+        return ["delete"]
+
+    m = re.match(r"^tag:(.+)$", best_action)
+    if m:
+        return [m.group(1)]
+
     return None
 
 
@@ -240,14 +313,15 @@ def auto_tag_email(
     msg: dict[str, any],  # type: ignore[type-arg]
     examples: list[dict] = (),     # e.g. [ {"from": "...", "action":"tag:A"} ]
     label_map: Optional[dict[str, str]] = None,
+    max_examples: int = 9,
 ) -> EmailDecision:
     """Predict and return the best tag(s) for a single email given prior decisions."""
 
     if not examples:
         # no training data yet — ask model to inspect first few chars only so it can say "delete" or "tag common patterns"
-        labels = pick_labels_from_prompt({"from_field": "", "subject": f"{msg.get('subject','')[:100]}", "snippet":""}, examples, label_map)  # type: ignore[union-attr]
+        labels = pick_labels_from_prompt({"from_field": "", "subject": f"{msg.get('subject','')[:100]}", "snippet":""}, examples, label_map, max_examples)  # type: ignore[union-attr]
     else:
-        labels = pick_labels_from_prompt(msg, examples, label_map)
+        labels = pick_labels_from_prompt(msg, examples, label_map, max_examples)
 
     # fall back to rule-based matching when LLM is unavailable
     if not labels:

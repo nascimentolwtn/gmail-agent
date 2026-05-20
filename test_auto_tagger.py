@@ -5,6 +5,9 @@
 Demonstrates the core few-shot learning logic using synthetic emails that mirror
 real ones in your examples.json. Run directly to see predictions, then compare them
 to expected outputs and tune the training set accordingly.
+
+Example selection is based on content similarity (sender + subject + body overlap),
+not just recency — so the model sees the most relevant prior decisions.
 """
 
 
@@ -12,7 +15,8 @@ import sys; sys.path.insert(0, ".")  # so imports like fetch_emails work
 
 from auto_tagger import (    # noqa: F401,F821
     load_examples, extract_user_labels, pick_labels_from_prompt,
-    auto_tag_email, EmailDecision as Decision
+    auto_tag_email, EmailDecision as Decision,
+    _example_similarity_score, _select_similar_examples,
 )
 
 
@@ -57,6 +61,7 @@ def run_demo(args=None):
 
     print(f"\n{'='*69}")
     print(f"Running {len(test_cases)} test cases with {len(seed_examples)} examples...")
+    print(f"  (similarity-based selection, top-{9} examples per inference)")
     print('='*69)
 
     for idx, (from_addr, subject, expected_label) in enumerate(test_cases, start=1):
@@ -64,7 +69,7 @@ def run_demo(args=None):
             "from_field": from_addr,
             "subject": subject.strip(),
             "snippet": f"From: {from_addr}\nSubject: {subject[:200]}"[:60],
-        }, examples=seed_examples)
+        }, examples=seed_examples, max_examples=9)
 
         # decision.action is either a string ("delete") or a list (["tag:LABEL"])
         if isinstance(decision.action, list):
@@ -94,6 +99,7 @@ def run_demo(args=None):
             auto_tag_email(
                 {"from_field": t[0], "subject": t[1], "snippet": ""},
                 seed_examples,
+                max_examples=9,
             )
             for t in test_cases
         ]
