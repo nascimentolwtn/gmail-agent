@@ -176,7 +176,7 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
     for ex in similar_examples:
         ex_from = ex.get("from", "")
         ex_subj = ex.get("subject", "")
-        ex_snip = (ex.get("snippet", "") or ex.get("body_snippet", ""))[:120]
+        ex_snip = (ex.get("snippet", "") or ex.get("body_snippet", ""))[:150]
         ex_action = ex.get("action", "")
         if isinstance(ex_action, list):
             ex_action = ", ".join(ex_action)
@@ -338,7 +338,7 @@ def auto_tag_email(
     if not examples:
         # no training data yet — ask model to inspect first few chars only
         labels, reason = pick_labels_from_prompt(
-            {"from_field": "", "subject": f"{msg.get('subject','')[:100]}", "snippet": ""},
+            {"from_field": "", "subject": f"{msg.get('subject','')[:300]}", "snippet": ""},
             examples, label_map, max_examples,
         )
     else:
