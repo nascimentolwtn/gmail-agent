@@ -27,31 +27,95 @@ def run_demo(args=None):
     print("="*70)
 
     # ----------------------------------------------------------------------
-    # Build a training set similar to real examples.json (50 entries is enough for
-    # the model to learn your labeling preferences). If you already have a large
-    # examples.json file and want to use it, pass its path here instead.
+    # Build a training set similar to real examples.json. Each entry has
+    # from, subject, body (full text), and the action that was taken.
     # ----------------------------------------------------------------------
     seed_examples: list[dict] = [
-        {"from": "ngrok team",      "subject": "Your endpoint is open",       "action": ["tag:EngSW/LLM"]},
-        {"from": "Mercado Livre",   "subject": "Compra está a caminho",        "action": "delete"},
-        {"from": "99Pay",           "subject": "Seu Pix foi realizado",        "action": "delete"},
-        {"from": "Filipe Newsletter","subject": "Devs ficando \"burros\"",    "action": ["tag:InovaçãoTecnológica"]},
-        {"from": "Avenue Security" , "subject": "Extrato mensal disponível",  "action": ["tag:Unibanco-Itaú/Investimentos/USA"]},
-        {"from": "Kidslox",         "subject": "Multiple PIN attempts",        "action": ["tag:Família/Crianças"]},
-        {"from": "Google family",   "subject": "Family activity report",       "action": ["tag:Família/Crianças"]},
+        {
+            "from": "ngrok team",
+            "subject": "Your endpoint is open",
+            "body": "Hi there, your ngrok endpoint is now live and ready to accept connections. You can share the URL with your team.",
+            "action": ["tag:EngSW/LLM"],
+        },
+        {
+            "from": "Mercado Livre",
+            "subject": "Compra está a caminho",
+            "body": "Olá! Seu pedido foi enviado e chegará em 3 dias úteis. Acompanhe o rastreamento pelo app.",
+            "action": "delete",
+        },
+        {
+            "from": "99Pay",
+            "subject": "Seu Pix foi realizado",
+            "body": "Pix de R$ 150,00 enviado para João Silva com sucesso. Comprovante disponível no app.",
+            "action": "delete",
+        },
+        {
+            "from": "Filipe Newsletter",
+            "subject": "Devs ficando \"burros\"",
+            "body": "Nesta edição: como o uso excessivo de LLMs está afetando a capacidade de raciocínio dos devs. Artigos e reflexões sobre o futuro da programação.",
+            "action": ["tag:InovaçãoTecnológica"],
+        },
+        {
+            "from": "Avenue Security",
+            "subject": "Extrato mensal disponível",
+            "body": "Seu extrato de investimentos nos EUA está disponível. Acesse o portal para visualizar posições, dividendos e performance.",
+            "action": ["tag:Unibanco-Itaú/Investimentos/USA"],
+        },
+        {
+            "from": "Kidslox",
+            "subject": "Multiple PIN attempts",
+            "body": "We detected multiple incorrect PIN attempts on your child's device. Please review activity and update your security settings.",
+            "action": ["tag:Família/Crianças"],
+        },
+        {
+            "from": "Google family",
+            "subject": "Family activity report",
+            "body": "Weekly family activity report: screen time, app usage, and location history for all family members. Review in the Family Link app.",
+            "action": ["tag:Família/Crianças"],
+        },
     ] * 7
 
     # ----------------------------------------------------------------------
     # Simulate a fresh inbox of unread emails to be tagged. Each tuple is:
-    #   (realistic_from, realistic_subject, expected_tag_or_delete)
+    #   (realistic_from, realistic_subject, body, expected_tag_or_delete)
     # ----------------------------------------------------------------------
-    test_cases: list[tuple[str, str, str]] = [
-        ("ngrok team",         "A couple more ngrok tips  ",      "EngSW/LLM"),
-        ("Filipe Newsletter" , "Tokenmaxxing na Amazon / Microsoft:", "InovaçãoTecnológica"),
-        ("Mercado Livre"     ,"Dê sua opinião sobre Suporte Base Refrigeração...",   "delete"),
-        ("99Pay",             "Seu Pix foi realizado com sucesso!",          "delete"),
-        ("Avenue Security"   , "Errata — Nova data: migração da Conta corrente em 18 de maio",  "Unibanco-Itaú/Investimentos/USA"),
-        ("Google family"     ,"Review Patricia's activity on their Google Account",       "Família/Crianças"),
+    test_cases: list[tuple[str, str, str, str]] = [
+        (
+            "ngrok team",
+            "A couple more ngrok tips",
+            "Here are some advanced ngrok configurations for tunneling WebSocket connections and custom domains. Check out the docs for more.",
+            "EngSW/LLM",
+        ),
+        (
+            "Filipe Newsletter",
+            "Tokenmaxxing na Amazon / Microsoft:",
+            "Análise detalhada sobre o uso massivo de tokens de IA nas big techs. Custos, eficiência e o futuro dos modelos de linguagem corporativos.",
+            "InovaçãoTecnológica",
+        ),
+        (
+            "Mercado Livre",
+            "Dê sua opinião sobre Suporte Base Refrigeração...",
+            "Queremos ouvir você! Avalie sua experiência recente com o produto Suporte Base Refrigeração. Responda nossa pesquisa de satisfação.",
+            "delete",
+        ),
+        (
+            "99Pay",
+            "Seu Pix foi realizado com sucesso!",
+            "Comprovante: Pix de R$ 89,90 enviado para Maria Santos. Data: 20/05/2026. Dúvidas? Acesse o suporte no app.",
+            "delete",
+        ),
+        (
+            "Avenue Security",
+            "Errata — Nova data: migração da Conta corrente em 18 de maio",
+            "Informamos que a data de migração da conta corrente foi alterada para 18 de maio. Pedimos desculpelo pelo transtorno. Para mais detalhes, acesse o portal.",
+            "Unibanco-Itaú/Investimentos/USA",
+        ),
+        (
+            "Google family",
+            "Review Patricia's activity on their Google Account",
+            "Patricia used 4h 32m of screen time this week. Top apps: YouTube (2h), TikTok (1h 30m). Location history shows school and home. Review settings in Family Link.",
+            "Família/Crianças",
+        ),
     ]
 
     # ----------------------------------------------------------------------
@@ -64,11 +128,12 @@ def run_demo(args=None):
     print(f"  (similarity-based selection, top-{9} examples per inference)")
     print('='*69)
 
-    for idx, (from_addr, subject, expected_label) in enumerate(test_cases, start=1):
+    for idx, (from_addr, subject, body, expected_label) in enumerate(test_cases, start=1):
         decision = auto_tag_email({
             "from_field": from_addr,
             "subject": subject.strip(),
-            "snippet": f"From: {from_addr}\nSubject: {subject[:200]}"[:60],
+            "snippet": body[:200],
+            "body_snippet": body[:200],
         }, examples=seed_examples, max_examples=9)
 
         # decision.action is either a string ("delete") or a list (["tag:LABEL"])
@@ -86,9 +151,15 @@ def run_demo(args=None):
         all_passed &= passed
 
         status = "✓ PASS" if passed else "✗ FAIL"
-        print(f"\n[{status}] Test {idx:2d} — From:{from_addr!r:<30} Subject:{subject[:65]!r}")
-        if not passed:
-            print(f"     Expected label={expected!r}  Got   action={decision.action!r}"); continue
+        print(f"\n[{status}] Test {idx:2d} — From:{from_addr!r:<30} Subject:{subject[:55]!r}")
+        if passed:
+            print(f"         Action  : {decision.action!r}")
+        else:
+            print(f"         Expected: {expected!r}  Got: {decision.action!r}")
+        if decision.reasoning:
+            # indent each line of the reason for readability
+            for line in decision.reasoning.split("\n"):
+                print(f"         Reason  : {line}")
 
     # ----------------------------------------------------------------------
     # Print aggregate stats for quick sanity checks.
@@ -97,13 +168,13 @@ def run_demo(args=None):
     tagged = sum(
         1 for d in [
             auto_tag_email(
-                {"from_field": t[0], "subject": t[1], "snippet": ""},
+                {"from_field": t[0], "subject": t[1], "snippet": t[2][:200], "body_snippet": t[2][:200]},
                 seed_examples,
                 max_examples=9,
             )
             for t in test_cases
         ]
-        if d
+        if d.action
     )
 
     print("\n" + "="*69)

@@ -202,7 +202,9 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
         + (f"  Available labels: {labels_list}\n\n" if labels_list else "")
         + "  RULES:\n"
         "  • Return ONLY valid JSON — no explanation, no markdown code fences\n"
-        '  • Format: {"labels":[...]} OR null (use null if delete or uncertain)\n'
+        '  • Format: {"labels":[...], "reason":"..."} OR null\n'
+        '  • The "reason" field should briefly explain WHY you chose these labels\n'
+        '    based on which past decisions influenced your choice (1-2 sentences)\n'
     )
 
     user_body: str = ""
@@ -244,31 +246,32 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
         elif isinstance(data.get("choices", [{}])[0].get("message", {}).get("content"), str):  # type: ignore[attr-defined]
             raw_text = data["choices"][0]["message"]["content"]
         if not raw_text or "{" not in raw_text:
-            return []
+            return [], ""
 
         out = json.loads(raw_text)   # we expect {"labels": [...] } or null
     except Exception:  # noqa: PERF203, try/except on LLM call — caller handles "no model" gracefully
-        return []
+        return [], ""
 
     if isinstance(out, list):
-        return []
+        return [], ""
     if out is None:
-        return []   # signal to delete / skip instead of tag
+        return [], ""   # signal to delete / skip instead of tag
     if isinstance(out, dict):
-        return out.get("labels", [])
-    return []
+        labels = out.get("labels", [])
+        reason = out.get("reason", "")
+        return labels, reason
+    return [], ""
 
 
-def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> Optional[list[str]]:
+def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> tuple[Optional[list[str]], str]:
     """Fallback: aggregate actions from the top-N most similar examples.
 
     Uses the same similarity scoring and selection as the LLM path, then picks
-    the highest-weighted action across the top matches. This approximates what
-    the LLM would reason about: if most similar emails were tagged "EngSW/LLM"
-    and a few were deleted, we tag as "EngSW/LLM".
+    the highest-weighted action across the top matches. Returns a reason string
+    explaining which past decisions influenced the choice.
     """
     if not examples:
-        return None
+        return None, ""
 
     # get the top-N most similar examples (same selection as LLM path)
     top_examples = _select_similar_examples(msg, examples, max_examples=max_examples)
@@ -278,7 +281,7 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> O
     relevant = [(ex, s) for ex, s in scored if s > 0]
 
     if not relevant:
-        return None
+        return None, ""
 
     # weight each example's action by its similarity score
     action_weights: dict[str, float] = {}
@@ -293,20 +296,31 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> O
                     action_weights[a_str] = action_weights.get(a_str, 0) + score
 
     if not action_weights:
-        return None
+        return None, ""
 
     # pick the highest-weighted action
     best_action = max(action_weights, key=action_weights.get)
 
+    # build reason from the top matching examples
+    top_matches = sorted(relevant, key=lambda pair: pair[1], reverse=True)[:3]
+    match_summaries = []
+    for ex, score in top_matches:
+        ex_from = ex.get("from", "")
+        ex_action = ex.get("action", "")
+        if isinstance(ex_action, list):
+            ex_action = ", ".join(ex_action)
+        match_summaries.append(f"  - From={ex_from!r} → {ex_action} (score={score:.1f})")
+    reason = "Rule-based: matched similar past decisions:\n" + "\n".join(match_summaries)
+
     # normalise → list of label strings (without "tag:" prefix)
     if best_action.lower() == "delete":
-        return ["delete"]
+        return ["delete"], reason
 
     m = re.match(r"^tag:(.+)$", best_action)
     if m:
-        return [m.group(1)]
+        return [m.group(1)], reason
 
-    return None
+    return None, ""
 
 
 def auto_tag_email(
@@ -317,39 +331,48 @@ def auto_tag_email(
 ) -> EmailDecision:
     """Predict and return the best tag(s) for a single email given prior decisions."""
 
+    from_field = msg.get("from", "")[:200]
+    subject = msg.get("subject", "")[:400].replace("\n", " ")
+    snippet = msg.get("snippet", "")
+
     if not examples:
-        # no training data yet — ask model to inspect first few chars only so it can say "delete" or "tag common patterns"
-        labels = pick_labels_from_prompt({"from_field": "", "subject": f"{msg.get('subject','')[:100]}", "snippet":""}, examples, label_map, max_examples)  # type: ignore[union-attr]
+        # no training data yet — ask model to inspect first few chars only
+        labels, reason = pick_labels_from_prompt(
+            {"from_field": "", "subject": f"{msg.get('subject','')[:100]}", "snippet": ""},
+            examples, label_map, max_examples,
+        )
     else:
-        labels = pick_labels_from_prompt(msg, examples, label_map, max_examples)
+        labels, reason = pick_labels_from_prompt(msg, examples, label_map, max_examples)
 
     # fall back to rule-based matching when LLM is unavailable
     if not labels:
-        labels = _rule_based_tag(msg, examples)
+        labels, reason = _rule_based_tag(msg, examples, max_examples)
 
     if not labels:
         return EmailDecision(
-            from_field=msg.get("from", "")[:200],
-            subject=msg.get("subject", "")[:400].replace("\n", " "),
-            snippet=msg.get("snippet", ""),
+            from_field=from_field,
+            subject=subject,
+            snippet=snippet,
             action=None,
+            reasoning="",
         )
 
     # handle delete
     if labels == ["delete"] or labels == "delete":
         return EmailDecision(
-            from_field=msg.get("from", "")[:200],
-            subject=msg.get("subject", "")[:400].replace("\n", " "),
-            snippet=msg.get("snippet", ""),
+            from_field=from_field,
+            subject=subject,
+            snippet=snippet,
             action="delete",
+            reasoning=reason,
         )
 
-    # strip "tag:" prefix if caller prefers raw names — callers of apply_decision() handle this
     return EmailDecision(
-        from_field=msg.get("from", "")[:200],
-        subject=msg.get("subject", "")[:400].replace("\n", " "),
-        snippet=msg.get("snippet", ""),
+        from_field=from_field,
+        subject=subject,
+        snippet=snippet,
         action=[f"tag:{l}" for l in labels],
+        reasoning=reason,
     )
 
 
