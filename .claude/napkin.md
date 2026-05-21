@@ -59,12 +59,10 @@ Ordered by impact and what unblocks what (not conversation order).
     Do instead: extract shared helper from `get_recent_labels` + sort (e.g. `ordered_labels_for_picker(examples, session, label_map, top_n=9)`): top-N by usage in `examples.json` + session first, remaining labels alphabetical. Use in `pick_labels()` (`tagger_cli`) and when building `LABELS` / `openTagModal` (`tagger_flask`).
   Do instead (parent): reuse `review_emails` ordering/filter logic in both interfaces so tag picking matches CLI behavior.
 
-- [ ] **[2026-05-20] Tag picker modal polish (`tagger_flask`)**
-  - [ ] **1) Separator: top-N picks vs A–Z remaining tags **
-    Do instead: in `#tagModal`, visual divider between frequent labels (`LABELS` / `ordered_labels_for_picker` top-N) and the rest — mirror CLI `pick_labels` section break (`review_emails.py` ~L67–68). Pass `top_n` or `recent_count` from server so `renderLabelOptions` can insert `<optgroup>` or a disabled separator option.
-  - [ ] **2) Sticky multi-select across filter**
-    Do instead: `renderLabelOptions` / `filterLabels` rebuild `<select>` and drop prior selections. Keep a `modalSelectedTags` `Set`; on toggle add/remove; on re-render restore `selected` for names in the set; `confirmTagPick` reads the set (not only visible `selectedOptions`).
-  Do instead (parent): multi-tag workflow: pick one label, filter, pick another without losing the first.
+- [x] **[2026-05-20] Tag picker modal polish (`tagger_flask`)**
+  Fixed:
+  - **Separator**: server passes `top_n` (count of frequent labels). `renderLabelOptions` inserts a disabled `────` option between the last "frequent" label and the first A–Z label. When filter narrows the list, separator still appears at the correct boundary.
+  - **Sticky multi-select**: `modalSelectedTags` Set persists across filter re-renders. `renderLabelOptions` restores `opt.selected = true` for Set members. `syncModalSelection()` on `<select onchange>` updates the Set from DOM. `confirmTagPick` reads from the Set, not DOM `selectedOptions` — so filtering + picking works seamlessly.
 
 - [x] **[2026-05-20] Deduplicate `fetch_emails.py` (in-file only)**
   Fixed: extracted `_message_to_email(service, msg, body_chars)` helper (lines 6–39). Both `get_unread_emails` and `get_unread_emails_paginated` now call it — each keeps its own list/pagination logic. ~40 lines of duplication removed.

@@ -56,7 +56,7 @@
   <div class="modal">
     <h3>🏷 Pick Tags</h3>
     <input type="text" class="filter-input" id="tagFilter" placeholder="Filter labels…" oninput="filterLabels(this.value)">
-    <select id="tagSelect" multiple></select>
+    <select id="tagSelect" multiple onchange="syncModalSelection(this)"></select>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeTagModal()">Cancel</button>
       <button class="btn-confirm" onclick="confirmTagPick()">Confirm</button>
@@ -201,22 +201,27 @@ function updateRowUI(idx) {
 
 // ── Tag picker modal ────────────────────────────────────────────────────
 let modalRowIdx = null;
-let allLabelNames = [];  // cached for filtering
+let allLabelNames = [];   // cached for filtering
+let modalSelectedTags = new Set();  // sticky selection across filter re-renders
+const LABEL_TOP_N = {{ top_n | safe }};  // server tells us how many are "frequent"
+
+function syncModalSelection(sel) {
+  // Rebuild the Set from current DOM selection state
+  modalSelectedTags = new Set(Array.from(sel.selectedOptions).map(o => o.value));
+}
 
 function openTagModal(idx) {
   modalRowIdx = idx;
   allLabelNames = LABELS.map(l => l.name);
-  renderLabelOptions(allLabelNames);
+  modalSelectedTags = new Set();
 
   // Pre-select tags from the auto-suggestion (DECISIONS[idx].action)
   const decision = DECISIONS[idx];
   if (decision && decision.action && Array.isArray(decision.action)) {
-    const suggested = new Set(decision.action.map(a => a.replace('tag:', '')));
-    const sel = document.getElementById('tagSelect');
-    for (const opt of sel.options) {
-      opt.selected = suggested.has(opt.value);
-    }
+    decision.action.forEach(a => modalSelectedTags.add(a.replace('tag:', '')));
   }
+
+  renderLabelOptions(allLabelNames);
 
   // Clear filter input
   document.getElementById('tagFilter').value = '';
@@ -227,10 +232,27 @@ function openTagModal(idx) {
 function renderLabelOptions(names) {
   const sel = document.getElementById('tagSelect');
   sel.innerHTML = '';
+
+  // Determine which visible names are in the "top-N frequent" set
+  const topNSet = new Set(allLabelNames.slice(0, LABEL_TOP_N));
+
+  let separatorInserted = false;
   names.forEach(n => {
+    // Insert a disabled separator between frequent and A–Z sections
+    if (!separatorInserted && !topNSet.has(n) && LABEL_TOP_N > 0) {
+      const sep = document.createElement('option');
+      sep.disabled = true;
+      sep.textContent = '────────────────';
+      sep.style.color = '#ccc';
+      sep.style.fontSize = '0.75rem';
+      sel.appendChild(sep);
+      separatorInserted = true;
+    }
     const opt = document.createElement('option');
     opt.value = n;
     opt.textContent = n;
+    // Restore sticky selection
+    if (modalSelectedTags.has(n)) opt.selected = true;
     sel.appendChild(opt);
   });
 }
@@ -244,12 +266,12 @@ function filterLabels(term) {
 function closeTagModal() {
   document.getElementById('tagModal').classList.remove('active');
   modalRowIdx = null;
+  modalSelectedTags = new Set();
 }
 
 function confirmTagPick() {
-  const sel = document.getElementById('tagSelect');
-  const selected = Array.from(sel.selectedOptions).map(o => o.value);
-  if (selected.length > 0 && modalRowIdx !== null) {
+  if (modalRowIdx !== null && modalSelectedTags.size > 0) {
+    const selected = Array.from(modalSelectedTags);
     state[modalRowIdx] = {
       status: 'tagged',
       action: selected.map(l => 'tag:' + l),

@@ -226,6 +226,10 @@ def dashboard():
     # Labels for the tag picker — top-N frequent first, then A–Z
     ordered_names = ordered_labels_for_picker(label_map, examples)
     label_list = [{"name": n, "id": label_map[n]} for n in ordered_names]
+    # ordered_labels_for_picker returns top-N first, then A–Z — pass the count
+    # so the JS can render a visual divider between the two sections.
+    from review_emails import get_recent_labels
+    top_n = len(get_recent_labels(examples, None))
 
     # Build lookup of already-processed emails from examples.json
     # so the UI can mark them without user intervention.
@@ -244,6 +248,7 @@ def dashboard():
         labels_json=json.dumps(label_list, ensure_ascii=False),
         total_json=json.dumps(total),
         already_processed_json=json.dumps(already_processed, ensure_ascii=False),
+        top_n=top_n,
     )
 
 
