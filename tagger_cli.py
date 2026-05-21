@@ -159,7 +159,9 @@ def run_cli() -> None:
 
     print(f"  {len(examples)} examples loaded | {len(label_map)} Gmail labels available")
 
-    emails, unreadable, total = get_unread_emails(service, max_results=50)
+    emails_to_fetch=300
+    print(f"  Fetching {emails_to_fetch} unread emails from Google, please wait...")
+    emails, unreadable, total = get_unread_emails(service, max_results=emails_to_fetch)
     print(f"  {len(emails)} unread emails fetched ({unreadable} unreadable)")
 
     if not emails:
