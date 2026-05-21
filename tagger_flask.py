@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime, timezone
 from typing import Optional
 
 from flask import Flask, request, jsonify, render_template_string
@@ -43,9 +44,32 @@ _fetch_state: dict = {
     "batches": [],            # list of (email_dict_list, decision_dict_list) tuples
     "error": None,
     "last_served_idx": 0,     # index into batches for /api/more cursor
+    "last_activity": None,    # {action: str, ts: ISO-8601 UTC string}
+    "background_fetch_started": False,
+    "next_page_token": None,   # stored so /api/fetch_next can resume
+    "all_fetched": False,      # true when no more pages
 }
 
 BATCH_SIZE = 20              # emails per background batch
+PENDING_SUGGESTIONS_FILE = "pending_suggestions.json"
+
+
+def _load_pending_suggestions() -> dict:
+    """Load cached LLM suggestions for pending emails. Returns {email_id: {action, reasoning}}."""
+    if not os.path.exists(PENDING_SUGGESTIONS_FILE):
+        return {}
+    try:
+        with open(PENDING_SUGGESTIONS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_pending_suggestions(suggestions: dict) -> None:
+    """Persist cached LLM suggestions to disk."""
+    with open(PENDING_SUGGESTIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(suggestions, f, indent=2, ensure_ascii=False)
 
 
 def _reset_fetch_state() -> None:
@@ -58,17 +82,21 @@ def _reset_fetch_state() -> None:
             "batches": [],
             "error": None,
             "last_served_idx": 0,
+            "last_activity": None,
+            "background_fetch_started": False,
+            "next_page_token": None,
+            "all_fetched": False,
         })
 
 
-def _background_fetch(service, examples: list, label_map: dict, total_expected: int) -> None:
+def _background_fetch(service, examples: list, label_map: dict, total_expected: int, start_page_token: Optional[str] = None) -> None:
     """Fetch remaining batches in a background thread.
 
     The first batch is already done by the time this starts, so we
-    continue from page_token returned by the paginated fetcher.
+    continue from the page_token returned by the paginated fetcher (batch 0).
     """
-    page_token: Optional[str] = None
-    first_batch_done = True  # the dashboard route already did batch 0
+    page_token: Optional[str] = start_page_token
+    first_batch_done = start_page_token is not None  # skip empty first iteration when resuming mid-list
 
     try:
         while True:
@@ -78,7 +106,7 @@ def _background_fetch(service, examples: list, label_map: dict, total_expected: 
                 batch_size=BATCH_SIZE,
             )
 
-            if not emails and not first_batch_done:
+            if not emails:
                 break
 
             # Tag each email
@@ -116,6 +144,10 @@ def _background_fetch(service, examples: list, label_map: dict, total_expected: 
     finally:
         with _fetch_lock:
             _fetch_state["done"] = True
+            _fetch_state["last_activity"] = {
+                "action": "fetch_complete",
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +194,7 @@ DASHBOARD_HTML = """\
     tr:hover { background: #f8f9fa; }
     tr.skipped { opacity: 0.45; }
     tr.committed { background: #e8f5e9; }
-    tr.already-processed { background: #f8f9fa; opacity: 0.6; }
+    tr.already-processed { background: #e8f5e9; }
     .from { max-width: 180px; white-space: nowrap; overflow: hidden;
             text-overflow: ellipsis; }
     .subject { max-width: 240px; white-space: nowrap; overflow: hidden;
@@ -235,6 +267,7 @@ DASHBOARD_HTML = """\
   <div class="spinner" id="spinner"></div>
   <span id="loadingText">Loading emails…</span>
 </div>
+<div id="lastActivity" style="font-size:0.78rem;color:#888;margin-bottom:10px;"></div>
 
 <div class="toolbar">
   <button class="btn-commit" id="btnCommit" onclick="commitAll()" disabled>
@@ -356,8 +389,11 @@ function buildRow(idx) {
 function addBatch(emails, decisions) {
   const tbody = document.getElementById('emailTable');
   const startIdx = EMAILS.length;
+  const existingIds = new Set(EMAILS.map(e => e.id));
 
   emails.forEach((email, i) => {
+    if (email.id && existingIds.has(email.id)) return;   // skip duplicate
+    if (email.id) existingIds.add(email.id);
     const idx = startIdx + i;
     EMAILS.push(email);
     DECISIONS.push(decisions[i]);
@@ -395,6 +431,12 @@ function updateRowUI(idx) {
   row.className = s.status === 'skipped' ? 'skipped'
     : s.status === 'already-processed' ? 'already-processed'
     : s.status === 'committed' ? 'committed' : '';
+  // Update suggestion badge from state (reflects user's actual decision)
+  const suggestionTd = row.children[4]; // 5th column = Suggestion
+  if (suggestionTd) {
+    const action = s.action || DECISIONS[idx].action;
+    suggestionTd.innerHTML = formatSuggestionBadge(action);
+  }
   const statusTd = document.getElementById('status-' + idx);
   statusTd.textContent = s.status;
   statusTd.className = 'status status-' + s.status;
@@ -507,6 +549,7 @@ async function commitAll() {
     });
 
     showToast(`✓ Committed: ${data.tagged} tagged, ${data.deleted} deleted, ${data.errors} errors`, 'success');
+    if (data.last_activity) updateLastActivity(data.last_activity);
   } catch (err) {
     showToast('Commit failed: ' + err, 'error');
   } finally {
@@ -545,7 +588,7 @@ async function pollForMore() {
       addBatch(data.emails, data.decisions);
     }
 
-    updateLoadingBar(data.loaded, data.total, data.done, data.error);
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity);
 
     if (data.done) {
       clearInterval(pollTimer);
@@ -554,7 +597,7 @@ async function pollForMore() {
       // where /api/more returned done but with stale loaded/total
       const statusResp = await fetch('/api/status');
       const status = await statusResp.json();
-      updateLoadingBar(status.loaded, status.total, status.done, status.error);
+      updateLoadingBar(status.loaded, status.total, status.done, status.error, status.last_activity);
     }
   } catch (err) {
     // transient network error — keep polling
@@ -562,7 +605,17 @@ async function pollForMore() {
   }
 }
 
-function updateLoadingBar(loaded, total, done, error) {
+function updateLastActivity(activity) {
+  if (!activity || !activity.ts) return;
+  const el = document.getElementById('lastActivity');
+  const labels = { first_batch: '⏳ First batch loaded', fetch_complete: '✓ All emails loaded', commit: '✓ Commit completed' };
+  const label = labels[activity.action] || activity.action;
+  const d = new Date(activity.ts);
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  el.textContent = label + ' at ' + timeStr;
+}
+
+function updateLoadingBar(loaded, total, done, error, activity) {
   const bar = document.getElementById('loadingBar');
   const text = document.getElementById('loadingText');
 
@@ -580,6 +633,7 @@ function updateLoadingBar(loaded, total, done, error) {
     const totalStr = total > 0 ? ` / ~${total}` : '';
     text.textContent = `⏳ Loading emails… ${loaded}${totalStr} loaded so far — review while you wait!`;
   }
+  if (activity) updateLastActivity(activity);
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────
@@ -596,7 +650,7 @@ function init() {
   // Show initial loading state (check server in case fetch is already done)
   fetch('/api/status')
     .then(r => r.json())
-    .then(s => updateLoadingBar(s.loaded, s.total, s.done, s.error))
+    .then(s => updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity))
     .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null));
 
   // Start polling for background batches
@@ -651,7 +705,7 @@ def dashboard():
             },
         })
 
-    # Store first batch in shared state
+    # Store first batch in shared state (index 0 — already rendered in page HTML)
     with _fetch_lock:
         _fetch_state["total"] = total
         _fetch_state["loaded"] = len(first_batch)
@@ -665,19 +719,22 @@ def dashboard():
             [{"action": d["decision"]["action"], "reasoning": d["decision"]["reasoning"]}
              for d in first_emails_data],
         ))
+        # Skip batch 0 when serving /api/more — client already has it from INITIAL_EMAILS
+        _fetch_state["last_served_idx"] = 1
 
-    # Kick off background thread for remaining batches
-    if next_token:
-        t = threading.Thread(
-            target=_background_fetch,
-            args=(service, examples, label_map, total),
-            daemon=True,
-        )
-        t.start()
-    else:
-        # No remaining pages — mark done immediately so the loading bar resolves
-        with _fetch_lock:
-            _fetch_state["done"] = True
+    # Record first-batch fetch timestamp
+    with _fetch_lock:
+        _fetch_state["last_activity"] = {
+            "action": "first_batch",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Store next_token so /api/fetch_next can load more on user demand.
+    # Do NOT auto-start background fetch — user controls via dashboard button.
+    with _fetch_lock:
+        _fetch_state["next_page_token"] = next_token
+        _fetch_state["all_fetched"] = next_token is None
+        _fetch_state["done"] = next_token is None  # done if no more pages
 
     # Labels for the tag picker — top-N frequent first, then A–Z
     ordered_names = ordered_labels_for_picker(label_map, examples)
@@ -712,6 +769,7 @@ def api_status():
             "loaded": _fetch_state["loaded"],
             "total": _fetch_state["total"],
             "error": _fetch_state["error"],
+            "last_activity": _fetch_state.get("last_activity"),
         })
 
 
@@ -883,11 +941,18 @@ def api_commit():
         except Exception:
             pass  # don't fail the commit if saving examples fails
 
+    with _fetch_lock:
+        _fetch_state["last_activity"] = {
+            "action": "commit",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+
     return jsonify({
         "tagged": tagged,
         "deleted": deleted,
         "errors": errors,
         "details": details,
+        "last_activity": _fetch_state["last_activity"],
     })
 
 

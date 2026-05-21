@@ -32,7 +32,7 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-20] `tagger_flask`: mark inbox rows already in `examples.json`**
   Do instead: after fetch (sync + background batches), match each message to `examples.json` (prefer `email_id`, else from+subject); set row status to non-pending (e.g. `skipped` / `already_processed`) with clear label. Email stays unread in Gmail — only UI state reflects prior training.
 
-- [ ] **[2026-05-20] `tagger_flask`: green highlight for already-processed rows**
+- [ ] **[2026-05-20] `tagger_flask`: green highlight for already-processed / already-trained rows**
   Do instead: replace gray/muted `tr.already-processed` (~L165: `#f8f9fa` + opacity) with a distinct green tone (lighter/softer than `tr.committed` `#e8f5e9`). Apply in `buildRow` / `updateRowUI` when `status === 'already-processed'` so “trained in examples” vs “committed this session” is obvious at a glance.
 
 - [x] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**
@@ -59,8 +59,15 @@ Ordered by impact and what unblocks what (not conversation order).
     Do instead: extract shared helper from `get_recent_labels` + sort (e.g. `ordered_labels_for_picker(examples, session, label_map, top_n=9)`): top-N by usage in `examples.json` + session first, remaining labels alphabetical. Use in `pick_labels()` (`tagger_cli`) and when building `LABELS` / `openTagModal` (`tagger_flask`).
   Do instead (parent): reuse `review_emails` ordering/filter logic in both interfaces so tag picking matches CLI behavior.
 
-- [ ] **[2026-05-20] Deduplicate `fetch_emails`**
-  Do instead: extract shared Gmail fetch/parsing into one module (e.g. `gmail_client.py`); remove copy-paste between `fetch_emails.py` and callers.
+- [ ] **[2026-05-20] Tag picker modal polish (`tagger_flask`)**
+  - [ ] **1) Separator: top-N picks vs A–Z remaining tags **
+    Do instead: in `#tagModal`, visual divider between frequent labels (`LABELS` / `ordered_labels_for_picker` top-N) and the rest — mirror CLI `pick_labels` section break (`review_emails.py` ~L67–68). Pass `top_n` or `recent_count` from server so `renderLabelOptions` can insert `<optgroup>` or a disabled separator option.
+  - [ ] **2) Sticky multi-select across filter**
+    Do instead: `renderLabelOptions` / `filterLabels` rebuild `<select>` and drop prior selections. Keep a `modalSelectedTags` `Set`; on toggle add/remove; on re-render restore `selected` for names in the set; `confirmTagPick` reads the set (not only visible `selectedOptions`).
+  Do instead (parent): multi-tag workflow: pick one label, filter, pick another without losing the first.
+
+- [ ] **[2026-05-20] Deduplicate `fetch_emails.py` (in-file only)**
+  Do instead: no new module — extract shared loop body from duplicated blocks `fetch_emails.py` L17–53 and L119–153 into one helper (e.g. `_message_to_email_dict(service, msg_id, body_chars)` → dict or None + unreadable). `get_unread_emails` and `get_unread_emails_paginated` keep list/pagination logic; only message fetch + decode + dict build is shared.
 
 - [ ] **[2026-05-20] `auto_tag_email`: LLM similarity over regex for label choice**
   Do instead: in `auto_tagger.auto_tag_email`, rank/pick labels by similarity to LLM prompt examples first; regex secondary/fallback. Same sender may need tag-then-act when context matters.
