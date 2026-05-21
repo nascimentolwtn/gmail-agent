@@ -17,6 +17,12 @@ Ordered by impact and what unblocks what (not conversation order).
 - [ ] **[2026-05-20] Skip already-processed emails in `examples.json`**
   Do instead: before appending, check `email_id` (or stable key) against existing entries; skip duplicates. Depends on commit path saving real ids.
 
+- [ ] **[2026-05-20] `tagger_flask`: mark inbox rows already in `examples.json`**
+  Do instead: after fetch (sync + background batches), match each message to `examples.json` (prefer `email_id`, else from+subject); set row status to non-pending (e.g. `skipped` / `already_processed`) with clear label. Email stays unread in Gmail — only UI state reflects prior training.
+
+- [ ] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**
+  Do instead: when `_fetch_state["done"]` is true, client must call `updateLoadingBar(..., done=true)` (spinner off, “done” styling). Fix `init()` forcing `done=false` (L545), last `/api/more` poll edge cases, and/or one final `/api/status` after `clearInterval`.
+
 - [ ] **[2026-05-20] Deduplicate `fetch_emails`**
   Do instead: extract shared Gmail fetch/parsing into one module (e.g. `gmail_client.py`); remove copy-paste between `fetch_emails.py` and callers.
 
