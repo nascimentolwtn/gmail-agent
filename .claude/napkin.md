@@ -34,6 +34,16 @@ Ordered by impact and what unblocks what (not conversation order).
     Do instead: when `auto_tag_email` returns `action` + `reasoning`, save per `email_id` (e.g. `pending_suggestions.json` or session store) even if row status stays `pending` and email isn’t in `examples.json` yet. Reload on refresh so LLM suggestions/reasons survive without re-calling the LLM; distinct from “already processed” in `examples.json`.
   Do instead (parent): gate background fetch+tag on user consent; cache LLM output for pending rows by message id.
 
+- [ ] **[2026-05-20] Tag picker UX (`tagger_flask` + `tagger_cli`)**
+  Improve manual tagging: use LLM suggestions in the picker, filter in modal, shared label ordering.
+  - [ ] **1) Pre-fill suggested tags in `tagger_flask` Pick modal**
+    Do instead: on `openTagModal(idx)`, pre-select options from `DECISIONS[idx].action` (`tag:…` labels). User sees the same tags the auto-suggester proposed before confirming or editing.
+  - [ ] **2) Filter labels in Flask tag modal**
+    Do instead: add search/filter input on `#tagModal` (like CLI `pick_labels` filter step in `review_emails.py`); narrow `<select>` options as user types.
+  - [ ] **3) Order labels: top-N frequent, then A–Z**
+    Do instead: extract shared helper from `get_recent_labels` + sort (e.g. `ordered_labels_for_picker(examples, session, label_map, top_n=9)`): top-N by usage in `examples.json` + session first, remaining labels alphabetical. Use in `pick_labels()` (`tagger_cli`) and when building `LABELS` / `openTagModal` (`tagger_flask`).
+  Do instead (parent): reuse `review_emails` ordering/filter logic in both interfaces so tag picking matches CLI behavior.
+
 - [ ] **[2026-05-20] Deduplicate `fetch_emails`**
   Do instead: extract shared Gmail fetch/parsing into one module (e.g. `gmail_client.py`); remove copy-paste between `fetch_emails.py` and callers.
 
