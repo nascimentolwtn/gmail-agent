@@ -72,8 +72,8 @@ Ordered by impact and what unblocks what (not conversation order).
 - [ ] **[2026-05-20] `auto_tag_email`: LLM similarity over regex for label choice**
   Do instead: in `auto_tagger.auto_tag_email`, rank/pick labels by similarity to LLM prompt examples first; regex secondary/fallback. Same sender may need tag-then-act when context matters.
 
-- [ ] **[2026-05-20] Split HTML/CSS from `tagger_flask.py`**
-  Do instead: move inline template (~L126–554) and `<style>` into `templates/` + `static/` (or equivalent); keep Flask routes thin. Easier UI tweaks after this.
+- [x] **[2026-05-20] Split HTML/CSS from `tagger_flask.py`**
+  Fixed: removed inline `DASHBOARD_HTML` string (~170 lines) and `<style>` block from Python. `tagger_flask.py` now uses `render_template("dashboard.html")` + `static/styles.css`. All JS logic (suggestions, fetch-next, dedup) preserved in template. Fixed missing `import os`. Made `tr.already-processed` visually distinct (blue `#e3f2fd`) from `tr.committed` (green `#e8f5e9`).
 
 - [ ] **[2026-05-20] Two-line rows in `tagger_flask` review table**
   Do instead: render each email on two lines (or wrap) so `subject`, `snippet`, and `reasoning` are readable. Prefer doing in extracted CSS once split is done.

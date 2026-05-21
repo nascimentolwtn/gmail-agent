@@ -1,0 +1,93 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background: #f5f5f5; color: #333; padding: 20px; }
+h1 { margin-bottom: 4px; font-size: 1.5rem; }
+.subtitle { color: #666; margin-bottom: 20px; font-size: 0.9rem; }
+.toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
+.toolbar button { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer;
+                  font-size: 0.9rem; font-weight: 600; }
+.btn-commit { background: #1a73e8; color: #fff; }
+.btn-commit:hover { background: #1557b0; }
+.btn-commit:disabled { background: #ccc; cursor: not-allowed; }
+.btn-refresh { background: #fff; color: #333; border: 1px solid #ddd; }
+.btn-refresh:hover { background: #f0f0f0; }
+.stats { font-size: 0.85rem; color: #666; }
+.loading-bar { margin-bottom: 12px; padding: 8px 14px; background: #e8f0fe;
+               border-radius: 6px; font-size: 0.85rem; color: #1a73e8;
+               display: flex; align-items: center; gap: 8px; }
+.loading-bar.done { background: #e6f4ea; color: #34a853; }
+.loading-bar.error { background: #fce8e6; color: #c5221f; }
+.spinner { width: 14px; height: 14px; border: 2px solid #1a73e8; border-top-color: transparent;
+           border-radius: 50%; animation: spin 0.8s linear infinite; }
+.loading-bar.done .spinner { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+table { width: 100%; border-collapse: collapse; background: #fff;
+        border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+th { background: #1a73e8; color: #fff; padding: 10px 12px; text-align: left;
+     font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 0.85rem;
+     vertical-align: top; }
+tr:hover { background: #f8f9fa; }
+tr.skipped { opacity: 0.45; }
+tr.committed { background: #e8f5e9; }
+tr.already-processed { background: #e3f2fd; }
+.from { max-width: 180px; white-space: nowrap; overflow: hidden;
+        text-overflow: ellipsis; }
+.subject { max-width: 240px; white-space: nowrap; overflow: hidden;
+           text-overflow: ellipsis; }
+.snippet { max-width: 200px; color: #666; font-size: 0.8rem;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.reasoning { max-width: 200px; color: #888; font-size: 0.75rem;
+             font-style: italic; white-space: nowrap; overflow: hidden;
+             text-overflow: ellipsis; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+         font-size: 0.75rem; font-weight: 600; }
+.badge-delete { background: #fce8e6; color: #c5221f; }
+.badge-tag { background: #e8f0fe; color: #1a73e8; }
+.badge-none { background: #f1f3f4; color: #888; }
+.actions button { padding: 4px 10px; margin: 2px; border: 1px solid #ddd;
+                  border-radius: 4px; cursor: pointer; font-size: 0.75rem;
+                  background: #fff; }
+.actions button:hover { background: #f0f0f0; }
+.actions .btn-accept { border-color: #34a853; color: #34a853; }
+.actions .btn-accept:hover { background: #e6f4ea; }
+.actions .btn-delete { border-color: #ea4335; color: #ea4335; }
+.actions .btn-delete:hover { background: #fce8e6; }
+.actions .btn-pick   { border-color: #1a73e8; color: #1a73e8; }
+.actions .btn-pick:hover { background: #e8f0fe; }
+.actions .btn-skip   { border-color: #aaa; color: #aaa; }
+.actions .btn-skip:hover { background: #f1f3f4; }
+.status { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
+.status-pending   { color: #888; }
+.status-accepted  { color: #34a853; }
+.status-delete    { color: #ea4335; }
+.status-skipped   { color: #aaa; }
+.status-committed { color: #1a73e8; }
+.status-already-processed { color: #1a73e8; font-style: italic; }
+/* Tag picker modal */
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                 background: rgba(0,0,0,0.4); z-index: 100; justify-content: center;
+                 align-items: center; }
+.modal-overlay.active { display: flex; }
+.modal { background: #fff; border-radius: 10px; padding: 24px; max-width: 420px;
+         width: 90%; max-height: 70vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
+.modal h3 { margin-bottom: 12px; font-size: 1rem; }
+.modal .filter-input { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px;
+                       font-size: 0.85rem; margin-bottom: 8px; }
+.modal .filter-input:focus { outline: none; border-color: #1a73e8; }
+.modal select { width: 100%; min-height: 160px; border: 1px solid #ddd; border-radius: 6px;
+                padding: 8px; font-size: 0.85rem; margin-bottom: 12px; }
+.modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal .modal-actions button { padding: 6px 16px; border-radius: 4px; border: 1px solid #ddd;
+                               cursor: pointer; font-size: 0.85rem; }
+.modal .btn-confirm { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+.modal .btn-confirm:hover { background: #1557b0; }
+.modal .btn-cancel { background: #fff; }
+.modal .btn-cancel:hover { background: #f0f0f0; }
+/* Toast */
+.toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px;
+         border-radius: 6px; color: #fff; font-size: 0.85rem; z-index: 200;
+         display: none; }
+.toast.show { display: block; }
+.toast-success { background: #34a853; }
+.toast-error   { background: #ea4335; }

@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gmail Auto-Tagger</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<h1>📬 Gmail Auto-Tagger</h1>
+<p class="subtitle">Review auto-suggested tags, adjust, then commit to your Gmail account.</p>
+
+<!-- Loading / progress bar -->
+<div class="loading-bar" id="loadingBar">
+  <div class="spinner" id="spinner"></div>
+  <span id="loadingText">Loading emails…</span>
+</div>
+<div id="lastActivity" style="font-size:0.78rem;color:#888;margin-bottom:10px;"></div>
+
+<!-- Fetch control: load next batch on demand -->
+<div id="fetchControl" style="margin-bottom:12px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;display:none;align-items:center;gap:10px;">
+  <span id="fetchControlText" style="font-size:0.85rem;color:#555;"></span>
+  <button class="btn-commit" id="btnFetchNext" onclick="fetchNextBatch()" style="padding:6px 16px;font-size:0.8rem;">Load next batch</button>
+  <span id="fetchSpinner" class="spinner" style="display:none;width:12px;height:12px;border-width:2px;"></span>
+</div>
+
+<div class="toolbar">
+  <button class="btn-commit" id="btnCommit" onclick="commitAll()" disabled>
+    ✓ Commit All
+  </button>
+  <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
+  <span class="stats" id="stats"></span>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>From</th>
+      <th>Subject</th>
+      <th>Snippet</th>
+      <th>Suggestion</th>
+      <th>Reasoning</th>
+      <th>Actions</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody id="emailTable">
+    <!-- rows injected by JS -->
+  </tbody>
+</table>
+
+<!-- Tag picker modal -->
+<div class="modal-overlay" id="tagModal">
+  <div class="modal">
+    <h3>🏷 Pick Tags</h3>
+    <input type="text" class="filter-input" id="tagFilter" placeholder="Filter labels…" oninput="filterLabels(this.value)">
+    <select id="tagSelect" multiple></select>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeTagModal()">Cancel</button>
+      <button class="btn-confirm" onclick="confirmTagPick()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Data injected by server (first batch only) ───────────────────────────
+const INITIAL_EMAILS = {{ emails_json | safe }};
+const LABELS = {{ labels_json | safe }};
+const ALREADY_PROCESSED = {{ already_processed_json | safe }};
+
+// ── State ────────────────────────────────────────────────────────────────
+// Each row: { status: 'pending'|'accepted'|'delete'|'tagged'|'skipped'|'committed',
+//             action: null|'delete'|['tag:LABEL',...] }
+const EMAILS = [];      // { id, from, subject, body_snippet }
+const DECISIONS = [];   // { action, reasoning }
+const state = [];       // per-row UI state
+
+// ── Helpers ──────────────────────────────────────────────────────────────
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function isAlreadyProcessed(email) {
+  if (email.id && ALREADY_PROCESSED.ids.includes(email.id)) return true;
+  const key = (email.from || '') + '||' + (email.subject || '');
+  return ALREADY_PROCESSED.keys.includes(key);
+}
+
+function formatSuggestionBadge(action) {
+  if (!action) return '<span class="badge badge-none">—</span>';
+  if (action === 'delete') return '<span class="badge badge-delete">🗑 delete</span>';
+  if (Array.isArray(action)) {
+    const labels = action.map(a => a.replace('tag:', '')).join(', ');
+    return `<span class="badge badge-tag">🏷 ${escHtml(labels)}</span>`;
+  }
+  return `<span class="badge badge-tag">🏷 ${escHtml(action)}</span>`;
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show toast-' + type;
+  setTimeout(() => { t.className = 'toast'; }, 4000);
+}
+
+// ── Build a table row for one email ──────────────────────────────────────
+function buildRow(idx) {
+  const email = EMAILS[idx];
+  const decision = DECISIONS[idx];
+  const tr = document.createElement('tr');
+  tr.id = 'row-' + idx;
+
+  const suggestionBadge = formatSuggestionBadge(decision.action);
+  const reasoning = (decision.reasoning || '').substring(0, 120);
+
+  const isDone = state[idx] && state[idx].status === 'already-processed';
+  const actionsHtml = isDone
+    ? '<span style="color:#aaa;font-size:0.75rem;">already&nbsp;trained</span>'
+    : `<button class="btn-accept" onclick="acceptRow(${idx})">✓</button>
+       <button class="btn-delete" onclick="deleteRow(${idx})">🗑</button>
+       <button class="btn-pick"   onclick="openTagModal(${idx})">🏷</button>
+       <button class="btn-skip"   onclick="skipRow(${idx})">→</button>`;
+  const statusLabel = isDone ? 'already-processed' : 'pending';
+  tr.innerHTML = `
+    <td>${idx + 1}</td>
+    <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
+    <td class="subject" title="${escHtml(email.subject)}">${escHtml(email.subject)}</td>
+    <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
+    <td>${suggestionBadge}</td>
+    <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
+    <td class="actions">${actionsHtml}</td>
+    <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
+  `;
+  return tr;
+}
+
+// ── Add a batch of emails to the table ───────────────────────────────────
+function addBatch(emails, decisions) {
+  const tbody = document.getElementById('emailTable');
+  const startIdx = EMAILS.length;
+  const existingIds = new Set(EMAILS.map(e => e.id));
+
+  emails.forEach((email, i) => {
+    if (email.id && existingIds.has(email.id)) return;   // skip duplicate
+    if (email.id) existingIds.add(email.id);
+    const idx = startIdx + i;
+    EMAILS.push(email);
+    DECISIONS.push(decisions[i]);
+    const processed = isAlreadyProcessed(email);
+    const hasSuggestion = !processed && decisions[i].action !== null && decisions[i].action !== '';
+    state.push({
+      status: processed ? 'already-processed' : (hasSuggestion ? 'pending' : 'skipped'),
+      action: processed ? null : (hasSuggestion ? decisions[i].action : null),
+    });
+    tbody.appendChild(buildRow(idx));
+  });
+
+  updateStats();
+}
+
+// ── Row actions ──────────────────────────────────────────────────────────
+function acceptRow(idx) {
+  state[idx] = { status: 'accepted', action: DECISIONS[idx].action };
+  updateRowUI(idx);
+}
+
+function deleteRow(idx) {
+  state[idx] = { status: 'delete', action: 'delete' };
+  updateRowUI(idx);
+}
+
+function skipRow(idx) {
+  state[idx] = { status: 'skipped', action: null };
+  updateRowUI(idx);
+}
+
+function updateRowUI(idx) {
+  const row = document.getElementById('row-' + idx);
+  const s = state[idx];
+  row.className = s.status === 'skipped' ? 'skipped'
+    : s.status === 'already-processed' ? 'already-processed'
+    : s.status === 'committed' ? 'committed' : '';
+  // Update suggestion badge from state (reflects user's actual decision)
+  const suggestionTd = row.children[4]; // 5th column = Suggestion
+  if (suggestionTd) {
+    const action = s.action || DECISIONS[idx].action;
+    suggestionTd.innerHTML = formatSuggestionBadge(action);
+  }
+  const statusTd = document.getElementById('status-' + idx);
+  statusTd.textContent = s.status;
+  statusTd.className = 'status status-' + s.status;
+  updateStats();
+}
+
+// ── Tag picker modal ────────────────────────────────────────────────────
+let modalRowIdx = null;
+let allLabelNames = [];  // cached for filtering
+
+function openTagModal(idx) {
+  modalRowIdx = idx;
+  allLabelNames = LABELS.map(l => l.name);
+  renderLabelOptions(allLabelNames);
+
+  // Pre-select tags from the auto-suggestion (DECISIONS[idx].action)
+  const decision = DECISIONS[idx];
+  if (decision && decision.action && Array.isArray(decision.action)) {
+    const suggested = new Set(decision.action.map(a => a.replace('tag:', '')));
+    const sel = document.getElementById('tagSelect');
+    for (const opt of sel.options) {
+      opt.selected = suggested.has(opt.value);
+    }
+  }
+
+  // Clear filter input
+  document.getElementById('tagFilter').value = '';
+  document.getElementById('tagModal').classList.add('active');
+  document.getElementById('tagFilter').focus();
+}
+
+function renderLabelOptions(names) {
+  const sel = document.getElementById('tagSelect');
+  sel.innerHTML = '';
+  names.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = n;
+    sel.appendChild(opt);
+  });
+}
+
+function filterLabels(term) {
+  const q = term.trim().toLowerCase();
+  const filtered = q ? allLabelNames.filter(n => n.toLowerCase().includes(q)) : allLabelNames;
+  renderLabelOptions(filtered);
+}
+
+function closeTagModal() {
+  document.getElementById('tagModal').classList.remove('active');
+  modalRowIdx = null;
+}
+
+function confirmTagPick() {
+  const sel = document.getElementById('tagSelect');
+  const selected = Array.from(sel.selectedOptions).map(o => o.value);
+  if (selected.length > 0 && modalRowIdx !== null) {
+    state[modalRowIdx] = {
+      status: 'tagged',
+      action: selected.map(l => 'tag:' + l),
+    };
+    updateRowUI(modalRowIdx);
+  }
+  closeTagModal();
+}
+
+// ── Commit ───────────────────────────────────────────────────────────────
+async function commitAll() {
+  const decisions = [];
+  state.forEach((s, idx) => {
+    if (s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged') {
+      if (s.action) {
+        decisions.push({
+          email_id: EMAILS[idx].id,
+          action: s.action,
+          reasoning: (DECISIONS[idx] && DECISIONS[idx].reasoning) || '',
+        });
+      }
+    }
+  });
+
+  if (decisions.length === 0) {
+    showToast('No decisions to commit.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btnCommit');
+  btn.disabled = true;
+  btn.textContent = 'Committing...';
+
+  try {
+    const resp = await fetch('/api/commit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decisions }),
+    });
+    const data = await resp.json();
+
+    // Mark committed rows
+    state.forEach((s, idx) => {
+      if (s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged') {
+        if (s.action) {
+          state[idx].status = 'committed';
+          const row = document.getElementById('row-' + idx);
+          if (row) row.className = 'committed';
+          const st = document.getElementById('status-' + idx);
+          if (st) { st.textContent = 'committed'; st.className = 'status status-committed'; }
+        }
+      }
+    });
+
+    showToast(`✓ Committed: ${data.tagged} tagged, ${data.deleted} deleted, ${data.errors} errors`, 'success');
+    if (data.last_activity) updateLastActivity(data.last_activity);
+  } catch (err) {
+    showToast('Commit failed: ' + err, 'error');
+  } finally {
+    btn.textContent = '✓ Commit All';
+    updateStats();
+  }
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────
+function updateStats() {
+  const total = state.length;
+  const pending = state.filter(s =>
+    s.status === 'pending' || s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged'
+  ).length;
+  const skipped = state.filter(s => s.status === 'skipped').length;
+  const committed = state.filter(s => s.status === 'committed').length;
+  const done = state.filter(s => s.status === 'already-processed').length;
+  document.getElementById('stats').textContent =
+    `${total} loaded | ${pending} ready | ${done} done | ${skipped} skipped | ${committed} committed`;
+  document.getElementById('btnCommit').disabled = pending === 0;
+}
+
+// ── Background polling ──────────────────────────────────────────────────
+let pollTimer = null;
+
+function startPolling() {
+  pollTimer = setInterval(pollForMore, 2000);
+}
+
+async function pollForMore() {
+  try {
+    const resp = await fetch('/api/more');
+    const data = await resp.json();
+
+    if (data.emails && data.emails.length > 0) {
+      addBatch(data.emails, data.decisions);
+    }
+
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity);
+
+    if (data.done) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      // Final status check to close any race-condition window
+      // where /api/more returned done but with stale loaded/total
+      const statusResp = await fetch('/api/status');
+      const status = await statusResp.json();
+      updateLoadingBar(status.loaded, status.total, status.done, status.error, status.last_activity);
+    }
+  } catch (err) {
+    // transient network error — keep polling
+    console.warn('poll error:', err);
+  }
+}
+
+function updateLastActivity(activity) {
+  if (!activity || !activity.ts) return;
+  const el = document.getElementById('lastActivity');
+  const labels = { first_batch: '⏳ First batch loaded', fetch_complete: '✓ All emails loaded', commit: '✓ Commit completed' };
+  const label = labels[activity.action] || activity.action;
+  const d = new Date(activity.ts);
+  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  el.textContent = label + ' at ' + timeStr;
+}
+
+function updateLoadingBar(loaded, total, done, error, activity) {
+  const bar = document.getElementById('loadingBar');
+  const text = document.getElementById('loadingText');
+
+  if (error) {
+    bar.className = 'loading-bar error';
+    text.textContent = '⚠ Error loading emails: ' + error;
+    return;
+  }
+
+  if (done) {
+    bar.className = 'loading-bar done';
+    text.textContent = `✓ All ${loaded} emails loaded`;
+  } else {
+    bar.className = 'loading-bar';
+    const totalStr = total > 0 ? ` / ~${total}` : '';
+    text.textContent = `⏳ Loading emails… ${loaded}${totalStr} loaded so far — review while you wait!`;
+  }
+  if (activity) updateLastActivity(activity);
+}
+
+// ── Load cached LLM suggestions ──────────────────────────────────────────
+async function loadCachedSuggestions() {
+  try {
+    const resp = await fetch('/api/suggestions');
+    const data = await resp.json();
+    // Merge cached suggestions into DECISIONS for pending rows
+    if (data.suggestions) {
+      EMAILS.forEach((email, idx) => {
+        const cached = data.suggestions[email.id];
+        if (cached && (!DECISIONS[idx].action || DECISIONS[idx].action === '')) {
+          DECISIONS[idx].action = cached.action;
+          DECISIONS[idx].reasoning = cached.reasoning;
+          // Update the row UI if it exists
+          const row = document.getElementById('row-' + idx);
+          if (row) {
+            const suggestionTd = row.children[4];
+            if (suggestionTd) suggestionTd.innerHTML = formatSuggestionBadge(cached.action);
+            const reasoningTd = row.children[5];
+            if (reasoningTd) reasoningTd.textContent = (cached.reasoning || '').substring(0, 120);
+          }
+        }
+      });
+    }
+  } catch (e) { /* ignore — suggestions are optional */ }
+}
+
+// ── Fetch next batch (user-initiated) ────────────────────────────────────
+async function fetchNextBatch() {
+  const btn = document.getElementById('btnFetchNext');
+  const spinner = document.getElementById('fetchSpinner');
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  try {
+    const resp = await fetch('/api/fetch_next', { method: 'POST' });
+    const data = await resp.json();
+    if (data.emails && data.emails.length > 0) {
+      addBatch(data.emails, data.decisions);
+    }
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity);
+    updateFetchControl(data);
+  } catch (err) {
+    showToast('Fetch failed: ' + err, 'error');
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+  }
+}
+
+function updateFetchControl(data) {
+  const ctrl = document.getElementById('fetchControl');
+  const text = document.getElementById('fetchControlText');
+  if (data.all_fetched || data.done) {
+    ctrl.style.display = 'none';
+  } else {
+    ctrl.style.display = 'flex';
+    const remaining = (data.total > 0) ? data.total - data.loaded : '?';
+    text.textContent = data.loaded + ' loaded' + (data.total > 0 ? ' of ~' + data.total : '') + ' — ' + remaining + ' remaining';
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+async function init() {
+  // Populate initial batch
+  addBatch(
+    INITIAL_EMAILS.map(e => e.email),
+    INITIAL_EMAILS.map(e => e.decision),
+  );
+
+  // Load cached LLM suggestions (survives refresh)
+  await loadCachedSuggestions();
+
+  // Show initial loading state
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(s => {
+      updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity);
+      updateFetchControl(s);
+    })
+    .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null));
+}
+
+init();
+</script>
+</body>
+</html>
