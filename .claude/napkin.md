@@ -17,7 +17,7 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-20] Skip already-processed emails in `examples.json`**
   Do instead: before appending, check `email_id` (or stable key) against existing entries; skip duplicates. Depends on commit path saving real ids.
 
-- [ ] **[2026-05-20] `tagger_flask`: mark inbox rows already in `examples.json`**
+- [x] **[2026-05-20] `tagger_flask`: mark inbox rows already in `examples.json`**
   Do instead: after fetch (sync + background batches), match each message to `examples.json` (prefer `email_id`, else from+subject); set row status to non-pending (e.g. `skipped` / `already_processed`) with clear label. Email stays unread in Gmail — only UI state reflects prior training.
 
 - [ ] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**

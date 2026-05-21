@@ -162,6 +162,7 @@ DASHBOARD_HTML = """\
     tr:hover { background: #f8f9fa; }
     tr.skipped { opacity: 0.45; }
     tr.committed { background: #e8f5e9; }
+    tr.already-processed { background: #f8f9fa; opacity: 0.6; }
     .from { max-width: 180px; white-space: nowrap; overflow: hidden;
             text-overflow: ellipsis; }
     .subject { max-width: 240px; white-space: nowrap; overflow: hidden;
@@ -194,6 +195,7 @@ DASHBOARD_HTML = """\
     .status-delete    { color: #ea4335; }
     .status-skipped   { color: #aaa; }
     .status-committed { color: #1a73e8; }
+    .status-already-processed { color: #80868b; }
     /* Tag picker modal */
     .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
                      background: rgba(0,0,0,0.4); z-index: 100; justify-content: center;
@@ -276,6 +278,7 @@ DASHBOARD_HTML = """\
 // ── Data injected by server (first batch only) ───────────────────────────
 const INITIAL_EMAILS = {{ emails_json | safe }};
 const LABELS = {{ labels_json | safe }};
+const ALREADY_PROCESSED = {{ already_processed_json | safe }};
 
 // ── State ────────────────────────────────────────────────────────────────
 // Each row: { status: 'pending'|'accepted'|'delete'|'tagged'|'skipped'|'committed',
@@ -289,6 +292,12 @@ function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s || '';
   return d.innerHTML;
+}
+
+function isAlreadyProcessed(email) {
+  if (email.id && ALREADY_PROCESSED.ids.includes(email.id)) return true;
+  const key = (email.from || '') + '||' + (email.subject || '');
+  return ALREADY_PROCESSED.keys.includes(key);
 }
 
 function formatSuggestionBadge(action) {
@@ -318,6 +327,14 @@ function buildRow(idx) {
   const suggestionBadge = formatSuggestionBadge(decision.action);
   const reasoning = (decision.reasoning || '').substring(0, 120);
 
+  const isDone = state[idx] && state[idx].status === 'already-processed';
+  const actionsHtml = isDone
+    ? '<span style="color:#aaa;font-size:0.75rem;">already&nbsp;trained</span>'
+    : `<button class="btn-accept" onclick="acceptRow(${idx})">✓</button>
+       <button class="btn-delete" onclick="deleteRow(${idx})">🗑</button>
+       <button class="btn-pick"   onclick="openTagModal(${idx})">🏷</button>
+       <button class="btn-skip"   onclick="skipRow(${idx})">→</button>`;
+  const statusLabel = isDone ? 'already-processed' : 'pending';
   tr.innerHTML = `
     <td>${idx + 1}</td>
     <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
@@ -325,13 +342,8 @@ function buildRow(idx) {
     <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
     <td>${suggestionBadge}</td>
     <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
-    <td class="actions">
-      <button class="btn-accept" onclick="acceptRow(${idx})">✓</button>
-      <button class="btn-delete" onclick="deleteRow(${idx})">🗑</button>
-      <button class="btn-pick"   onclick="openTagModal(${idx})">🏷</button>
-      <button class="btn-skip"   onclick="skipRow(${idx})">→</button>
-    </td>
-    <td class="status status-pending" id="status-${idx}">pending</td>
+    <td class="actions">${actionsHtml}</td>
+    <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
   `;
   return tr;
 }
@@ -345,10 +357,11 @@ function addBatch(emails, decisions) {
     const idx = startIdx + i;
     EMAILS.push(email);
     DECISIONS.push(decisions[i]);
-    const hasSuggestion = decisions[i].action !== null && decisions[i].action !== '';
+    const processed = isAlreadyProcessed(email);
+    const hasSuggestion = !processed && decisions[i].action !== null && decisions[i].action !== '';
     state.push({
-      status: hasSuggestion ? 'pending' : 'skipped',
-      action: hasSuggestion ? decisions[i].action : null,
+      status: processed ? 'already-processed' : (hasSuggestion ? 'pending' : 'skipped'),
+      action: processed ? null : (hasSuggestion ? decisions[i].action : null),
     });
     tbody.appendChild(buildRow(idx));
   });
@@ -375,7 +388,9 @@ function skipRow(idx) {
 function updateRowUI(idx) {
   const row = document.getElementById('row-' + idx);
   const s = state[idx];
-  row.className = s.status === 'skipped' ? 'skipped' : '';
+  row.className = s.status === 'skipped' ? 'skipped'
+    : s.status === 'already-processed' ? 'already-processed'
+    : s.status === 'committed' ? 'committed' : '';
   const statusTd = document.getElementById('status-' + idx);
   statusTd.textContent = s.status;
   statusTd.className = 'status status-' + s.status;
@@ -477,8 +492,9 @@ function updateStats() {
   ).length;
   const skipped = state.filter(s => s.status === 'skipped').length;
   const committed = state.filter(s => s.status === 'committed').length;
+  const done = state.filter(s => s.status === 'already-processed').length;
   document.getElementById('stats').textContent =
-    `${total} emails loaded | ${pending} ready | ${skipped} skipped | ${committed} committed`;
+    `${total} loaded | ${pending} ready | ${done} done | ${skipped} skipped | ${committed} committed`;
   document.getElementById('btnCommit').disabled = pending === 0;
 }
 
@@ -503,6 +519,11 @@ async function pollForMore() {
     if (data.done) {
       clearInterval(pollTimer);
       pollTimer = null;
+      // Final status check to close any race-condition window
+      // where /api/more returned done but with stale loaded/total
+      const statusResp = await fetch('/api/status');
+      const status = await statusResp.json();
+      updateLoadingBar(status.loaded, status.total, status.done, status.error);
     }
   } catch (err) {
     // transient network error — keep polling
@@ -541,8 +562,11 @@ function init() {
   // Populate label picker
   // (LABELS already available from server template)
 
-  // Show initial loading state
-  updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null);
+  // Show initial loading state (check server in case fetch is already done)
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(s => updateLoadingBar(s.loaded, s.total, s.done, s.error))
+    .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null));
 
   // Start polling for background batches
   startPolling();
@@ -619,15 +643,31 @@ def dashboard():
             daemon=True,
         )
         t.start()
+    else:
+        # No remaining pages — mark done immediately so the loading bar resolves
+        with _fetch_lock:
+            _fetch_state["done"] = True
 
     # Labels for the tag picker
     label_list = [{"name": k, "id": v} for k, v in label_map.items()]
+
+    # Build lookup of already-processed emails from examples.json
+    # so the UI can mark them without user intervention.
+    already_ids: set[str] = set()
+    already_keys: set[str] = set()  # "from||subject" composite
+    for ex in examples:
+        if ex.get("id"):
+            already_ids.add(ex["id"])
+        composite = f"{ex.get('from', '')}||{ex.get('subject', '')}"
+        already_keys.add(composite)
+    already_processed = {"ids": list(already_ids), "keys": list(already_keys)}
 
     return render_template_string(
         DASHBOARD_HTML,
         emails_json=json.dumps(first_emails_data, ensure_ascii=False),
         labels_json=json.dumps(label_list, ensure_ascii=False),
         total_json=json.dumps(total),
+        already_processed_json=json.dumps(already_processed, ensure_ascii=False),
     )
 
 
