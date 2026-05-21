@@ -762,16 +762,26 @@ def api_commit():
     # Save committed decisions to examples.json
     if tagged + deleted > 0:
         try:
+            # Build email lookup from fetched batches
+            with _fetch_lock:
+                batches = list(_fetch_state.get("batches", []))
+            email_lookup: dict[str, dict] = {}
+            for email_list, _ in batches:
+                for e in email_list:
+                    email_lookup[e["id"]] = e
+
             examples = load_examples("examples.json")
             for entry in raw_decisions:
                 email_id = entry.get("email_id", "")
                 action = entry.get("action")
                 if not email_id or not action:
                     continue
+                em = email_lookup.get(email_id, {})
                 examples.append({
-                    "from": "(web)",
-                    "subject": "(web)",
-                    "snippet": "",
+                    "id": email_id,
+                    "from": em.get("from", ""),
+                    "subject": em.get("subject", ""),
+                    "snippet": em.get("body_snippet", ""),
                     "action": action,
                 })
             save_examples(examples)

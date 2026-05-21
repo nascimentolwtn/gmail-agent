@@ -11,7 +11,7 @@
 
 Ordered by impact and what unblocks what (not conversation order).
 
-- [ ] **[2026-05-20] Fix `tagger_flask` commit → `examples.json` placeholders**
+- [x] **[2026-05-20] Fix `tagger_flask` commit → `examples.json` placeholders**
   Do instead: in `/commit` (~L762–776), stop appending hardcoded `"from": "(web)"`, `"subject": "(web)"`, `"snippet": ""`. Resolve each `email_id` from `raw_decisions` against session `EMAILS` (or re-fetch) and persist real `from`, `subject`, `snippet`, plus `id`/`email_id`.
 
 - [ ] **[2026-05-20] Skip already-processed emails in `examples.json`**
