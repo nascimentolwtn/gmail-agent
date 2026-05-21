@@ -11,8 +11,8 @@
 
 Ordered by impact and what unblocks what (not conversation order).
 
-- [ ] **[2026-05-20] URGENT FIXME: duplicate rows in `tagger_flask` email list**
-  Do instead: same message appears twice+ in the table — likely **not** commit (commit only marks `committed`, no re-fetch). Suspects: (1) `init()` `addBatch(INITIAL_EMAILS)` then `/api/more` re-serves batch 0 because `last_served_idx` starts at 0 while batch 0 is already in `_fetch_state["batches"]`; (2) `_background_fetch` starts with `page_token=None` and re-fetches/tags batch 0 again (~L70–111) despite dashboard already loading it. Fix: set `last_served_idx=1` after embedding initial batch, pass `next_token` into `_background_fetch`, dedupe `addBatch` by `email.id`, add regression test.
+- [x] **[2026-05-20] URGENT FIXME: duplicate rows in `tagger_flask` email list**
+  Fixed: (1) set `last_served_idx=1` after storing batch 0 so `/api/more` skips already-rendered rows; (2) pass `next_token` to `_background_fetch(start_page_token=…)` so it doesn't re-fetch page 1; (3) added JS-side `addBatch` dedup by `email.id` as safety net.
 
 - [ ] **[2026-05-20] `tagger_cli`: save Gmail `id` to `examples.json`**
   Do instead: after commit, `d.as_json()` (~`auto_tagger.EmailDecision`) only adds `"id"` when `email_id` is set; accept path appends raw `decision` and newer entries lack `id` (see `examples.json` ~L199+). Always set `entry["id"] = email["id"]` when saving from CLI (accept/delete/tag). Match `tagger_flask` `/api/commit` shape so dedup / already-processed marking works.
