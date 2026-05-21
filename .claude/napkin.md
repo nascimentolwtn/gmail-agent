@@ -23,6 +23,17 @@ Ordered by impact and what unblocks what (not conversation order).
 - [ ] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**
   Do instead: when `_fetch_state["done"]` is true, client must call `updateLoadingBar(..., done=true)` (spinner off, “done” styling). Fix `init()` forcing `done=false` (L545), last `/api/more` poll edge cases, and/or one final `/api/status` after `clearInterval`.
 
+- [ ] **[2026-05-20] `tagger_flask`: last-action timestamp (fetch + commit)**
+  Do instead: one dashboard field (e.g. near loading bar / summary) updated on each event with action label + local time: (1) first sync fetch finished, (2) background fetch finished, (3) commit completed. Single “last activity” line so user sees dashboard freshness; server can expose timestamps in `_fetch_state` / commit response, client updates on poll + commit success.
+
+- [ ] **[2026-05-20] `tagger_flask`: opt-in background fetch + persist pending LLM suggestions**
+  Today: after 1st batch loads, `_background_fetch` auto-runs `auto_tag_email` for every remaining unread (LLM keeps busy). Change flow so user controls continuation and work isn’t lost.
+  - [ ] **1) Dashboard control: fetch next batch?**
+    Do instead: add top-of-page control (toggle / “Load next batch” / Yes-No) after 1st sync batch; do not start `_background_fetch` (and LLM tagging for batch 2+) until user confirms. Each confirm loads one more `BATCH_SIZE` (or explicit “load all” if desired later).
+  - [ ] **2) Persist suggestions for still-pending rows**
+    Do instead: when `auto_tag_email` returns `action` + `reasoning`, save per `email_id` (e.g. `pending_suggestions.json` or session store) even if row status stays `pending` and email isn’t in `examples.json` yet. Reload on refresh so LLM suggestions/reasons survive without re-calling the LLM; distinct from “already processed” in `examples.json`.
+  Do instead (parent): gate background fetch+tag on user consent; cache LLM output for pending rows by message id.
+
 - [ ] **[2026-05-20] Deduplicate `fetch_emails`**
   Do instead: extract shared Gmail fetch/parsing into one module (e.g. `gmail_client.py`); remove copy-paste between `fetch_emails.py` and callers.
 
