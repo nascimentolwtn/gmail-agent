@@ -28,7 +28,7 @@ from flask import Flask, request, jsonify, render_template_string
 from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails_paginated
 from auto_tagger import auto_tag_email, load_examples
-from review_emails import load_labels, save_examples
+from review_emails import load_labels, save_examples, ordered_labels_for_picker
 
 app = Flask(__name__)
 
@@ -204,6 +204,9 @@ DASHBOARD_HTML = """\
     .modal { background: #fff; border-radius: 10px; padding: 24px; max-width: 420px;
              width: 90%; max-height: 70vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
     .modal h3 { margin-bottom: 12px; font-size: 1rem; }
+    .modal .filter-input { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px;
+                           font-size: 0.85rem; margin-bottom: 8px; }
+    .modal .filter-input:focus { outline: none; border-color: #1a73e8; }
     .modal select { width: 100%; min-height: 160px; border: 1px solid #ddd; border-radius: 6px;
                     padding: 8px; font-size: 0.85rem; margin-bottom: 12px; }
     .modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
@@ -263,6 +266,7 @@ DASHBOARD_HTML = """\
 <div class="modal-overlay" id="tagModal">
   <div class="modal">
     <h3>🏷 Pick Tags</h3>
+    <input type="text" class="filter-input" id="tagFilter" placeholder="Filter labels…" oninput="filterLabels(this.value)">
     <select id="tagSelect" multiple></select>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeTagModal()">Cancel</button>
@@ -399,18 +403,44 @@ function updateRowUI(idx) {
 
 // ── Tag picker modal ────────────────────────────────────────────────────
 let modalRowIdx = null;
+let allLabelNames = [];  // cached for filtering
 
 function openTagModal(idx) {
   modalRowIdx = idx;
+  allLabelNames = LABELS.map(l => l.name);
+  renderLabelOptions(allLabelNames);
+
+  // Pre-select tags from the auto-suggestion (DECISIONS[idx].action)
+  const decision = DECISIONS[idx];
+  if (decision && decision.action && Array.isArray(decision.action)) {
+    const suggested = new Set(decision.action.map(a => a.replace('tag:', '')));
+    const sel = document.getElementById('tagSelect');
+    for (const opt of sel.options) {
+      opt.selected = suggested.has(opt.value);
+    }
+  }
+
+  // Clear filter input
+  document.getElementById('tagFilter').value = '';
+  document.getElementById('tagModal').classList.add('active');
+  document.getElementById('tagFilter').focus();
+}
+
+function renderLabelOptions(names) {
   const sel = document.getElementById('tagSelect');
   sel.innerHTML = '';
-  LABELS.forEach(l => {
+  names.forEach(n => {
     const opt = document.createElement('option');
-    opt.value = l.name;
-    opt.textContent = l.name;
+    opt.value = n;
+    opt.textContent = n;
     sel.appendChild(opt);
   });
-  document.getElementById('tagModal').classList.add('active');
+}
+
+function filterLabels(term) {
+  const q = term.trim().toLowerCase();
+  const filtered = q ? allLabelNames.filter(n => n.toLowerCase().includes(q)) : allLabelNames;
+  renderLabelOptions(filtered);
 }
 
 function closeTagModal() {
@@ -440,6 +470,7 @@ async function commitAll() {
         decisions.push({
           email_id: EMAILS[idx].id,
           action: s.action,
+          reasoning: (DECISIONS[idx] && DECISIONS[idx].reasoning) || '',
         });
       }
     }
@@ -648,8 +679,9 @@ def dashboard():
         with _fetch_lock:
             _fetch_state["done"] = True
 
-    # Labels for the tag picker
-    label_list = [{"name": k, "id": v} for k, v in label_map.items()]
+    # Labels for the tag picker — top-N frequent first, then A–Z
+    ordered_names = ordered_labels_for_picker(label_map, examples)
+    label_list = [{"name": n, "id": label_map[n]} for n in ordered_names]
 
     # Build lookup of already-processed emails from examples.json
     # so the UI can mark them without user intervention.
@@ -840,6 +872,7 @@ def api_commit():
                     "subject": subject_val,
                     "snippet": em.get("body_snippet", ""),
                     "action": action,
+                    "reasoning": entry.get("reasoning", ""),
                 }
                 examples.append(new_entry)
                 # Track so subsequent entries in same batch also dedup

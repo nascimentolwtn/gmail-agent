@@ -35,9 +35,20 @@ def get_recent_labels(examples, session_decisions=None, top_n=9):
                 counter[a[4:]] += 1
     return [label for label, _ in counter.most_common(top_n)]
 
+
+def ordered_labels_for_picker(label_map, examples, session_decisions=None, top_n=9):
+    """Return label names ordered: top-N frequent first, then remaining A–Z."""
+    recent = get_recent_labels(examples, session_decisions, top_n)
+    recent_valid = [n for n in recent if n in label_map]
+    others = sorted([n for n in label_map if n not in recent_valid])
+    return recent_valid + others
+
 def pick_labels(label_map, examples, session_decisions=None):
     all_names = list(label_map.keys())
-    recent = get_recent_labels(examples, session_decisions)
+    ordered = ordered_labels_for_picker(label_map, examples, session_decisions)
+    # section_break = how many of the ordered list are "recent" (top-N)
+    recent_labels = set(get_recent_labels(examples, session_decisions))
+    section_break_count = len([n for n in ordered if n in recent_labels])
     selected = []
 
     while True:
@@ -48,11 +59,8 @@ def pick_labels(label_map, examples, session_decisions=None):
             return None
 
         if filter_term == "":
-            # show recent on top, then rest
-            recent_valid = [n for n in recent if n in label_map]
-            others = [n for n in all_names if n not in recent_valid]
-            display = recent_valid + others
-            section_break = len(recent_valid)
+            display = ordered
+            section_break = section_break_count
         else:
             display = [n for n in all_names if filter_term in n.lower()]
             section_break = None

@@ -37,7 +37,7 @@ Ordered by impact and what unblocks what (not conversation order).
     Do instead: when `auto_tag_email` returns `action` + `reasoning`, save per `email_id` (e.g. `pending_suggestions.json` or session store) even if row status stays `pending` and email isn’t in `examples.json` yet. Reload on refresh so LLM suggestions/reasons survive without re-calling the LLM; distinct from “already processed” in `examples.json`.
   Do instead (parent): gate background fetch+tag on user consent; cache LLM output for pending rows by message id.
 
-- [ ] **[2026-05-20] Tag picker UX (`tagger_flask` + `tagger_cli`)**
+- [x] **[2026-05-20] Tag picker UX (`tagger_flask` + `tagger_cli`)**
   Improve manual tagging: use LLM suggestions in the picker, filter in modal, shared label ordering.
   - [ ] **1) Pre-fill suggested tags in `tagger_flask` Pick modal**
     Do instead: on `openTagModal(idx)`, pre-select options from `DECISIONS[idx].action` (`tag:…` labels). User sees the same tags the auto-suggester proposed before confirming or editing.
