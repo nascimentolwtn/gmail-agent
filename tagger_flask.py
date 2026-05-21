@@ -20,11 +20,12 @@ Open: http://localhost:5050
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Optional
 
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template
 
 from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails_paginated
@@ -151,520 +152,6 @@ def _background_fetch(service, examples: list, label_map: dict, total_expected: 
 
 
 # ---------------------------------------------------------------------------
-# HTML template
-# ---------------------------------------------------------------------------
-
-DASHBOARD_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Gmail Auto-Tagger</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-           background: #f5f5f5; color: #333; padding: 20px; }
-    h1 { margin-bottom: 4px; font-size: 1.5rem; }
-    .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9rem; }
-    .toolbar { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; }
-    .toolbar button { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer;
-                      font-size: 0.9rem; font-weight: 600; }
-    .btn-commit { background: #1a73e8; color: #fff; }
-    .btn-commit:hover { background: #1557b0; }
-    .btn-commit:disabled { background: #ccc; cursor: not-allowed; }
-    .btn-refresh { background: #fff; color: #333; border: 1px solid #ddd; }
-    .btn-refresh:hover { background: #f0f0f0; }
-    .stats { font-size: 0.85rem; color: #666; }
-    .loading-bar { margin-bottom: 12px; padding: 8px 14px; background: #e8f0fe;
-                   border-radius: 6px; font-size: 0.85rem; color: #1a73e8;
-                   display: flex; align-items: center; gap: 8px; }
-    .loading-bar.done { background: #e6f4ea; color: #34a853; }
-    .loading-bar.error { background: #fce8e6; color: #c5221f; }
-    .spinner { width: 14px; height: 14px; border: 2px solid #1a73e8; border-top-color: transparent;
-               border-radius: 50%; animation: spin 0.8s linear infinite; }
-    .loading-bar.done .spinner { display: none; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    table { width: 100%; border-collapse: collapse; background: #fff;
-            border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    th { background: #1a73e8; color: #fff; padding: 10px 12px; text-align: left;
-         font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
-    td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 0.85rem;
-         vertical-align: top; }
-    tr:hover { background: #f8f9fa; }
-    tr.skipped { opacity: 0.45; }
-    tr.committed { background: #e8f5e9; }
-    tr.already-processed { background: #e8f5e9; }
-    .from { max-width: 180px; white-space: nowrap; overflow: hidden;
-            text-overflow: ellipsis; }
-    .subject { max-width: 240px; white-space: nowrap; overflow: hidden;
-               text-overflow: ellipsis; }
-    .snippet { max-width: 200px; color: #666; font-size: 0.8rem;
-               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .reasoning { max-width: 200px; color: #888; font-size: 0.75rem;
-                 font-style: italic; white-space: nowrap; overflow: hidden;
-                 text-overflow: ellipsis; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
-             font-size: 0.75rem; font-weight: 600; }
-    .badge-delete { background: #fce8e6; color: #c5221f; }
-    .badge-tag { background: #e8f0fe; color: #1a73e8; }
-    .badge-none { background: #f1f3f4; color: #888; }
-    .actions button { padding: 4px 10px; margin: 2px; border: 1px solid #ddd;
-                      border-radius: 4px; cursor: pointer; font-size: 0.75rem;
-                      background: #fff; }
-    .actions button:hover { background: #f0f0f0; }
-    .actions .btn-accept { border-color: #34a853; color: #34a853; }
-    .actions .btn-accept:hover { background: #e6f4ea; }
-    .actions .btn-delete { border-color: #ea4335; color: #ea4335; }
-    .actions .btn-delete:hover { background: #fce8e6; }
-    .actions .btn-pick   { border-color: #1a73e8; color: #1a73e8; }
-    .actions .btn-pick:hover { background: #e8f0fe; }
-    .actions .btn-skip   { border-color: #aaa; color: #aaa; }
-    .actions .btn-skip:hover { background: #f1f3f4; }
-    .status { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }
-    .status-pending   { color: #888; }
-    .status-accepted  { color: #34a853; }
-    .status-delete    { color: #ea4335; }
-    .status-skipped   { color: #aaa; }
-    .status-committed { color: #1a73e8; }
-    .status-already-processed { color: #80868b; }
-    /* Tag picker modal */
-    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-                     background: rgba(0,0,0,0.4); z-index: 100; justify-content: center;
-                     align-items: center; }
-    .modal-overlay.active { display: flex; }
-    .modal { background: #fff; border-radius: 10px; padding: 24px; max-width: 420px;
-             width: 90%; max-height: 70vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
-    .modal h3 { margin-bottom: 12px; font-size: 1rem; }
-    .modal .filter-input { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px;
-                           font-size: 0.85rem; margin-bottom: 8px; }
-    .modal .filter-input:focus { outline: none; border-color: #1a73e8; }
-    .modal select { width: 100%; min-height: 160px; border: 1px solid #ddd; border-radius: 6px;
-                    padding: 8px; font-size: 0.85rem; margin-bottom: 12px; }
-    .modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
-    .modal .modal-actions button { padding: 6px 16px; border-radius: 4px; border: 1px solid #ddd;
-                                   cursor: pointer; font-size: 0.85rem; }
-    .modal .btn-confirm { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-    .modal .btn-confirm:hover { background: #1557b0; }
-    .modal .btn-cancel { background: #fff; }
-    .modal .btn-cancel:hover { background: #f0f0f0; }
-    /* Toast */
-    .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px;
-             border-radius: 6px; color: #fff; font-size: 0.85rem; z-index: 200;
-             display: none; }
-    .toast.show { display: block; }
-    .toast-success { background: #34a853; }
-    .toast-error   { background: #ea4335; }
-  </style>
-</head>
-<body>
-
-<h1>📬 Gmail Auto-Tagger</h1>
-<p class="subtitle">Review auto-suggested tags, adjust, then commit to your Gmail account.</p>
-
-<!-- Loading / progress bar -->
-<div class="loading-bar" id="loadingBar">
-  <div class="spinner" id="spinner"></div>
-  <span id="loadingText">Loading emails…</span>
-</div>
-<div id="lastActivity" style="font-size:0.78rem;color:#888;margin-bottom:10px;"></div>
-
-<div class="toolbar">
-  <button class="btn-commit" id="btnCommit" onclick="commitAll()" disabled>
-    ✓ Commit All
-  </button>
-  <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
-  <span class="stats" id="stats"></span>
-</div>
-
-<table>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>From</th>
-      <th>Subject</th>
-      <th>Snippet</th>
-      <th>Suggestion</th>
-      <th>Reasoning</th>
-      <th>Actions</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="emailTable">
-    <!-- rows injected by JS -->
-  </tbody>
-</table>
-
-<!-- Tag picker modal -->
-<div class="modal-overlay" id="tagModal">
-  <div class="modal">
-    <h3>🏷 Pick Tags</h3>
-    <input type="text" class="filter-input" id="tagFilter" placeholder="Filter labels…" oninput="filterLabels(this.value)">
-    <select id="tagSelect" multiple></select>
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeTagModal()">Cancel</button>
-      <button class="btn-confirm" onclick="confirmTagPick()">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
-<script>
-// ── Data injected by server (first batch only) ───────────────────────────
-const INITIAL_EMAILS = {{ emails_json | safe }};
-const LABELS = {{ labels_json | safe }};
-const ALREADY_PROCESSED = {{ already_processed_json | safe }};
-
-// ── State ────────────────────────────────────────────────────────────────
-// Each row: { status: 'pending'|'accepted'|'delete'|'tagged'|'skipped'|'committed',
-//             action: null|'delete'|['tag:LABEL',...] }
-const EMAILS = [];      // { id, from, subject, body_snippet }
-const DECISIONS = [];   // { action, reasoning }
-const state = [];       // per-row UI state
-
-// ── Helpers ──────────────────────────────────────────────────────────────
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
-function isAlreadyProcessed(email) {
-  if (email.id && ALREADY_PROCESSED.ids.includes(email.id)) return true;
-  const key = (email.from || '') + '||' + (email.subject || '');
-  return ALREADY_PROCESSED.keys.includes(key);
-}
-
-function formatSuggestionBadge(action) {
-  if (!action) return '<span class="badge badge-none">—</span>';
-  if (action === 'delete') return '<span class="badge badge-delete">🗑 delete</span>';
-  if (Array.isArray(action)) {
-    const labels = action.map(a => a.replace('tag:', '')).join(', ');
-    return `<span class="badge badge-tag">🏷 ${escHtml(labels)}</span>`;
-  }
-  return `<span class="badge badge-tag">🏷 ${escHtml(action)}</span>`;
-}
-
-function showToast(msg, type) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show toast-' + type;
-  setTimeout(() => { t.className = 'toast'; }, 4000);
-}
-
-// ── Build a table row for one email ──────────────────────────────────────
-function buildRow(idx) {
-  const email = EMAILS[idx];
-  const decision = DECISIONS[idx];
-  const tr = document.createElement('tr');
-  tr.id = 'row-' + idx;
-
-  const suggestionBadge = formatSuggestionBadge(decision.action);
-  const reasoning = (decision.reasoning || '').substring(0, 120);
-
-  const isDone = state[idx] && state[idx].status === 'already-processed';
-  const actionsHtml = isDone
-    ? '<span style="color:#aaa;font-size:0.75rem;">already&nbsp;trained</span>'
-    : `<button class="btn-accept" onclick="acceptRow(${idx})">✓</button>
-       <button class="btn-delete" onclick="deleteRow(${idx})">🗑</button>
-       <button class="btn-pick"   onclick="openTagModal(${idx})">🏷</button>
-       <button class="btn-skip"   onclick="skipRow(${idx})">→</button>`;
-  const statusLabel = isDone ? 'already-processed' : 'pending';
-  tr.innerHTML = `
-    <td>${idx + 1}</td>
-    <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
-    <td class="subject" title="${escHtml(email.subject)}">${escHtml(email.subject)}</td>
-    <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
-    <td>${suggestionBadge}</td>
-    <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
-    <td class="actions">${actionsHtml}</td>
-    <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
-  `;
-  return tr;
-}
-
-// ── Add a batch of emails to the table ───────────────────────────────────
-function addBatch(emails, decisions) {
-  const tbody = document.getElementById('emailTable');
-  const startIdx = EMAILS.length;
-  const existingIds = new Set(EMAILS.map(e => e.id));
-
-  emails.forEach((email, i) => {
-    if (email.id && existingIds.has(email.id)) return;   // skip duplicate
-    if (email.id) existingIds.add(email.id);
-    const idx = startIdx + i;
-    EMAILS.push(email);
-    DECISIONS.push(decisions[i]);
-    const processed = isAlreadyProcessed(email);
-    const hasSuggestion = !processed && decisions[i].action !== null && decisions[i].action !== '';
-    state.push({
-      status: processed ? 'already-processed' : (hasSuggestion ? 'pending' : 'skipped'),
-      action: processed ? null : (hasSuggestion ? decisions[i].action : null),
-    });
-    tbody.appendChild(buildRow(idx));
-  });
-
-  updateStats();
-}
-
-// ── Row actions ──────────────────────────────────────────────────────────
-function acceptRow(idx) {
-  state[idx] = { status: 'accepted', action: DECISIONS[idx].action };
-  updateRowUI(idx);
-}
-
-function deleteRow(idx) {
-  state[idx] = { status: 'delete', action: 'delete' };
-  updateRowUI(idx);
-}
-
-function skipRow(idx) {
-  state[idx] = { status: 'skipped', action: null };
-  updateRowUI(idx);
-}
-
-function updateRowUI(idx) {
-  const row = document.getElementById('row-' + idx);
-  const s = state[idx];
-  row.className = s.status === 'skipped' ? 'skipped'
-    : s.status === 'already-processed' ? 'already-processed'
-    : s.status === 'committed' ? 'committed' : '';
-  // Update suggestion badge from state (reflects user's actual decision)
-  const suggestionTd = row.children[4]; // 5th column = Suggestion
-  if (suggestionTd) {
-    const action = s.action || DECISIONS[idx].action;
-    suggestionTd.innerHTML = formatSuggestionBadge(action);
-  }
-  const statusTd = document.getElementById('status-' + idx);
-  statusTd.textContent = s.status;
-  statusTd.className = 'status status-' + s.status;
-  updateStats();
-}
-
-// ── Tag picker modal ────────────────────────────────────────────────────
-let modalRowIdx = null;
-let allLabelNames = [];  // cached for filtering
-
-function openTagModal(idx) {
-  modalRowIdx = idx;
-  allLabelNames = LABELS.map(l => l.name);
-  renderLabelOptions(allLabelNames);
-
-  // Pre-select tags from the auto-suggestion (DECISIONS[idx].action)
-  const decision = DECISIONS[idx];
-  if (decision && decision.action && Array.isArray(decision.action)) {
-    const suggested = new Set(decision.action.map(a => a.replace('tag:', '')));
-    const sel = document.getElementById('tagSelect');
-    for (const opt of sel.options) {
-      opt.selected = suggested.has(opt.value);
-    }
-  }
-
-  // Clear filter input
-  document.getElementById('tagFilter').value = '';
-  document.getElementById('tagModal').classList.add('active');
-  document.getElementById('tagFilter').focus();
-}
-
-function renderLabelOptions(names) {
-  const sel = document.getElementById('tagSelect');
-  sel.innerHTML = '';
-  names.forEach(n => {
-    const opt = document.createElement('option');
-    opt.value = n;
-    opt.textContent = n;
-    sel.appendChild(opt);
-  });
-}
-
-function filterLabels(term) {
-  const q = term.trim().toLowerCase();
-  const filtered = q ? allLabelNames.filter(n => n.toLowerCase().includes(q)) : allLabelNames;
-  renderLabelOptions(filtered);
-}
-
-function closeTagModal() {
-  document.getElementById('tagModal').classList.remove('active');
-  modalRowIdx = null;
-}
-
-function confirmTagPick() {
-  const sel = document.getElementById('tagSelect');
-  const selected = Array.from(sel.selectedOptions).map(o => o.value);
-  if (selected.length > 0 && modalRowIdx !== null) {
-    state[modalRowIdx] = {
-      status: 'tagged',
-      action: selected.map(l => 'tag:' + l),
-    };
-    updateRowUI(modalRowIdx);
-  }
-  closeTagModal();
-}
-
-// ── Commit ───────────────────────────────────────────────────────────────
-async function commitAll() {
-  const decisions = [];
-  state.forEach((s, idx) => {
-    if (s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged') {
-      if (s.action) {
-        decisions.push({
-          email_id: EMAILS[idx].id,
-          action: s.action,
-          reasoning: (DECISIONS[idx] && DECISIONS[idx].reasoning) || '',
-        });
-      }
-    }
-  });
-
-  if (decisions.length === 0) {
-    showToast('No decisions to commit.', 'error');
-    return;
-  }
-
-  const btn = document.getElementById('btnCommit');
-  btn.disabled = true;
-  btn.textContent = 'Committing...';
-
-  try {
-    const resp = await fetch('/api/commit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decisions }),
-    });
-    const data = await resp.json();
-
-    // Mark committed rows
-    state.forEach((s, idx) => {
-      if (s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged') {
-        if (s.action) {
-          state[idx].status = 'committed';
-          const row = document.getElementById('row-' + idx);
-          if (row) row.className = 'committed';
-          const st = document.getElementById('status-' + idx);
-          if (st) { st.textContent = 'committed'; st.className = 'status status-committed'; }
-        }
-      }
-    });
-
-    showToast(`✓ Committed: ${data.tagged} tagged, ${data.deleted} deleted, ${data.errors} errors`, 'success');
-    if (data.last_activity) updateLastActivity(data.last_activity);
-  } catch (err) {
-    showToast('Commit failed: ' + err, 'error');
-  } finally {
-    btn.textContent = '✓ Commit All';
-    updateStats();
-  }
-}
-
-// ── Stats ────────────────────────────────────────────────────────────────
-function updateStats() {
-  const total = state.length;
-  const pending = state.filter(s =>
-    s.status === 'pending' || s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged'
-  ).length;
-  const skipped = state.filter(s => s.status === 'skipped').length;
-  const committed = state.filter(s => s.status === 'committed').length;
-  const done = state.filter(s => s.status === 'already-processed').length;
-  document.getElementById('stats').textContent =
-    `${total} loaded | ${pending} ready | ${done} done | ${skipped} skipped | ${committed} committed`;
-  document.getElementById('btnCommit').disabled = pending === 0;
-}
-
-// ── Background polling ──────────────────────────────────────────────────
-let pollTimer = null;
-
-function startPolling() {
-  pollTimer = setInterval(pollForMore, 2000);
-}
-
-async function pollForMore() {
-  try {
-    const resp = await fetch('/api/more');
-    const data = await resp.json();
-
-    if (data.emails && data.emails.length > 0) {
-      addBatch(data.emails, data.decisions);
-    }
-
-    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity);
-
-    if (data.done) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-      // Final status check to close any race-condition window
-      // where /api/more returned done but with stale loaded/total
-      const statusResp = await fetch('/api/status');
-      const status = await statusResp.json();
-      updateLoadingBar(status.loaded, status.total, status.done, status.error, status.last_activity);
-    }
-  } catch (err) {
-    // transient network error — keep polling
-    console.warn('poll error:', err);
-  }
-}
-
-function updateLastActivity(activity) {
-  if (!activity || !activity.ts) return;
-  const el = document.getElementById('lastActivity');
-  const labels = { first_batch: '⏳ First batch loaded', fetch_complete: '✓ All emails loaded', commit: '✓ Commit completed' };
-  const label = labels[activity.action] || activity.action;
-  const d = new Date(activity.ts);
-  const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  el.textContent = label + ' at ' + timeStr;
-}
-
-function updateLoadingBar(loaded, total, done, error, activity) {
-  const bar = document.getElementById('loadingBar');
-  const text = document.getElementById('loadingText');
-
-  if (error) {
-    bar.className = 'loading-bar error';
-    text.textContent = '⚠ Error loading emails: ' + error;
-    return;
-  }
-
-  if (done) {
-    bar.className = 'loading-bar done';
-    text.textContent = `✓ All ${loaded} emails loaded`;
-  } else {
-    bar.className = 'loading-bar';
-    const totalStr = total > 0 ? ` / ~${total}` : '';
-    text.textContent = `⏳ Loading emails… ${loaded}${totalStr} loaded so far — review while you wait!`;
-  }
-  if (activity) updateLastActivity(activity);
-}
-
-// ── Init ─────────────────────────────────────────────────────────────────
-function init() {
-  // Populate initial batch
-  addBatch(
-    INITIAL_EMAILS.map(e => e.email),
-    INITIAL_EMAILS.map(e => e.decision),
-  );
-
-  // Populate label picker
-  // (LABELS already available from server template)
-
-  // Show initial loading state (check server in case fetch is already done)
-  fetch('/api/status')
-    .then(r => r.json())
-    .then(s => updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity))
-    .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null));
-
-  // Start polling for background batches
-  startPolling();
-}
-
-init();
-</script>
-</body>
-</html>
-"""
-
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -751,8 +238,8 @@ def dashboard():
         already_keys.add(composite)
     already_processed = {"ids": list(already_ids), "keys": list(already_keys)}
 
-    return render_template_string(
-        DASHBOARD_HTML,
+    return render_template(
+        "dashboard.html",
         emails_json=json.dumps(first_emails_data, ensure_ascii=False),
         labels_json=json.dumps(label_list, ensure_ascii=False),
         total_json=json.dumps(total),
@@ -811,7 +298,99 @@ def api_more():
             "total": _fetch_state["total"],
             "done": _fetch_state["done"],
             "error": _fetch_state["error"],
+            "last_activity": _fetch_state.get("last_activity"),
         })
+
+
+@app.route("/api/fetch_next", methods=["POST"])
+def api_fetch_next():
+    """Fetch the next batch of emails on user demand.
+
+    Returns the new batch + updated progress.  If there are no more pages
+    the response will be empty with done=true.
+    """
+    with _fetch_lock:
+        page_token = _fetch_state.get("next_page_token")
+        all_fetched = _fetch_state.get("all_fetched", False)
+
+    if all_fetched or not page_token:
+        with _fetch_lock:
+            _fetch_state["done"] = True
+        return jsonify({
+            "emails": [], "decisions": [],
+            "loaded": _fetch_state["loaded"],
+            "total": _fetch_state["total"],
+            "done": True,
+            "all_fetched": True,
+        })
+
+    service = get_gmail_service()
+    examples = load_examples("examples.json")
+    label_map = load_labels(service)
+
+    emails, _, total, next_token = get_unread_emails_paginated(
+        service, page_token=page_token, batch_size=BATCH_SIZE
+    )
+
+    # Tag each email and persist suggestions
+    decisions = []
+    pending_updates = {}
+    for email in emails:
+        msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
+        decision = auto_tag_email(msg_for_tagging, examples, label_map)
+        decisions.append({
+            "action": decision.action,
+            "reasoning": decision.reasoning,
+        })
+        if decision.action:
+            pending_updates[email["id"]] = {
+                "action": decision.action,
+                "reasoning": decision.reasoning,
+            }
+
+    # Merge into pending_suggestions.json
+    if pending_updates:
+        existing = _load_pending_suggestions()
+        existing.update(pending_updates)
+        _save_pending_suggestions(existing)
+
+    with _fetch_lock:
+        _fetch_state["batches"].append(([{
+            "id": e["id"],
+            "from": e["from"],
+            "subject": e["subject"],
+            "body_snippet": e.get("body_snippet", "")[:150],
+        } for e in emails], decisions))
+        _fetch_state["loaded"] += len(emails)
+        _fetch_state["next_page_token"] = next_token
+        _fetch_state["all_fetched"] = next_token is None
+        _fetch_state["done"] = next_token is None
+        _fetch_state["last_activity"] = {
+            "action": "fetch_batch",
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return jsonify({
+        "emails": [{
+            "id": e["id"],
+            "from": e["from"],
+            "subject": e["subject"],
+            "body_snippet": e.get("body_snippet", "")[:150],
+        } for e in emails],
+        "decisions": decisions,
+        "loaded": _fetch_state["loaded"],
+        "total": _fetch_state["total"],
+        "done": _fetch_state["done"],
+        "all_fetched": _fetch_state["all_fetched"],
+        "last_activity": _fetch_state["last_activity"],
+    })
+
+
+@app.route("/api/suggestions")
+def api_suggestions():
+    """Return cached LLM suggestions for pending emails."""
+    suggestions = _load_pending_suggestions()
+    return jsonify({"suggestions": suggestions})
 
 
 @app.route("/api/labels")

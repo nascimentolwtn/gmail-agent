@@ -1,2 +1,4 @@
 __pycache__/
 examples_old*.json
+pending_suggestions.json
+token.json
