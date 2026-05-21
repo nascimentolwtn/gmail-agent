@@ -20,7 +20,10 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-20] `tagger_flask`: mark inbox rows already in `examples.json`**
   Do instead: after fetch (sync + background batches), match each message to `examples.json` (prefer `email_id`, else from+subject); set row status to non-pending (e.g. `skipped` / `already_processed`) with clear label. Email stays unread in Gmail — only UI state reflects prior training.
 
-- [ ] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**
+- [ ] **[2026-05-20] `tagger_flask`: green highlight for already-processed rows**
+  Do instead: replace gray/muted `tr.already-processed` (~L165: `#f8f9fa` + opacity) with a distinct green tone (lighter/softer than `tr.committed` `#e8f5e9`). Apply in `buildRow` / `updateRowUI` when `status === 'already-processed'` so “trained in examples” vs “committed this session” is obvious at a glance.
+
+- [x] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**
   Do instead: when `_fetch_state["done"]` is true, client must call `updateLoadingBar(..., done=true)` (spinner off, “done” styling). Fix `init()` forcing `done=false` (L545), last `/api/more` poll edge cases, and/or one final `/api/status` after `clearInterval`.
 
 - [ ] **[2026-05-20] `tagger_flask`: last-action timestamp (fetch + commit)**
