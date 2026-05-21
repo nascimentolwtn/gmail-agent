@@ -11,6 +11,9 @@
 
 Ordered by impact and what unblocks what (not conversation order).
 
+- [ ] **[2026-05-20] `tagger_flask`: loading progress only while fetching + beside “Load next batch”**
+  Do instead: hide or stop showing `⏳ Loading emails… N / ~T loaded so far — review while you wait!` when idle (first batch done, waiting on user). Show it only while `/api/fetch_next` is in flight (`fetchSpinner` / `fetching` flag). Move progress text into `#fetchControl` next to `#btnFetchNext` (not `#loadingBar`); keep `#loadingBar` for errors / “all loaded” or remove redundant spinner when opt-in fetch is the only background path (`templates/dashboard.html` `updateLoadingBar`, `fetchNextBatch`, `updateFetchControl`).
+
 - [x] **[2026-05-20] URGENT FIXME: duplicate rows in `tagger_flask` email list**
   Fixed: (1) set `last_served_idx=1` after storing batch 0 so `/api/more` skips already-rendered rows; (2) pass `next_token` to `_background_fetch(start_page_token=…)` so it doesn't re-fetch page 1; (3) added JS-side `addBatch` dedup by `email.id` as safety net.
 
@@ -73,5 +76,5 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-20] Split HTML/CSS from `tagger_flask.py`**
   Fixed: removed inline `DASHBOARD_HTML` string (~170 lines) and `<style>` block from Python. `tagger_flask.py` now uses `render_template("dashboard.html")` + `static/styles.css`. All JS logic (suggestions, fetch-next, dedup) preserved in template. Fixed missing `import os`. Made `tr.already-processed` visually distinct (blue `#e3f2fd`) from `tr.committed` (green `#e8f5e9`).
 
-- [ ] **[2026-05-20] Two-line rows in `tagger_flask` review table**
-  Do instead: render each email on two lines (or wrap) so `subject`, `snippet`, and `reasoning` are readable. Prefer doing in extracted CSS once split is done.
+- [x] **[2026-05-20] Two-line rows in `tagger_flask` review table**
+  Fixed: replaced `white-space: nowrap; text-overflow: ellipsis` on `.subject`, `.snippet`, `.reasoning` with `-webkit-line-clamp: 2` + standard `line-clamp: 2`. Widened subject to 300px and reasoning to 260px, narrowed snippet (Tags) to 120px. Added `.suggestion` class to its TD with 2-line clamp so badges wrap instead of truncating. Increased JS reasoning truncation from 120 to 200 chars.

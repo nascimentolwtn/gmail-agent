@@ -56,7 +56,7 @@
   <div class="modal">
     <h3>🏷 Pick Tags</h3>
     <input type="text" class="filter-input" id="tagFilter" placeholder="Filter labels…" oninput="filterLabels(this.value)">
-    <select id="tagSelect" multiple onchange="syncModalSelection(this)"></select>
+    <select id="tagSelect" multiple onchange="handleSelectChange(this)"></select>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeTagModal()">Cancel</button>
       <button class="btn-confirm" onclick="confirmTagPick()">Confirm</button>
@@ -118,7 +118,7 @@ function buildRow(idx) {
   tr.id = 'row-' + idx;
 
   const suggestionBadge = formatSuggestionBadge(decision.action);
-  const reasoning = (decision.reasoning || '').substring(0, 120);
+  const reasoning = (decision.reasoning || '').substring(0, 200);
 
   const isDone = state[idx] && state[idx].status === 'already-processed';
   const actionsHtml = isDone
@@ -133,7 +133,7 @@ function buildRow(idx) {
     <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
     <td class="subject" title="${escHtml(email.subject)}">${escHtml(email.subject)}</td>
     <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
-    <td>${suggestionBadge}</td>
+    <td class="suggestion">${suggestionBadge}</td>
     <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
     <td class="actions">${actionsHtml}</td>
     <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
@@ -205,11 +205,6 @@ let allLabelNames = [];   // cached for filtering
 let modalSelectedTags = new Set();  // sticky selection across filter re-renders
 const LABEL_TOP_N = {{ top_n | safe }};  // server tells us how many are "frequent"
 
-function syncModalSelection(sel) {
-  // Rebuild the Set from current DOM selection state
-  modalSelectedTags = new Set(Array.from(sel.selectedOptions).map(o => o.value));
-}
-
 function openTagModal(idx) {
   modalRowIdx = idx;
   allLabelNames = LABELS.map(l => l.name);
@@ -223,7 +218,6 @@ function openTagModal(idx) {
 
   renderLabelOptions(allLabelNames);
 
-  // Clear filter input
   document.getElementById('tagFilter').value = '';
   document.getElementById('tagModal').classList.add('active');
   document.getElementById('tagFilter').focus();
@@ -233,28 +227,57 @@ function renderLabelOptions(names) {
   const sel = document.getElementById('tagSelect');
   sel.innerHTML = '';
 
-  // Determine which visible names are in the "top-N frequent" set
+  // Build set of which visible names are in the "top-N frequent" region
   const topNSet = new Set(allLabelNames.slice(0, LABEL_TOP_N));
 
-  let separatorInserted = false;
-  names.forEach(n => {
-    // Insert a disabled separator between frequent and A–Z sections
-    if (!separatorInserted && !topNSet.has(n) && LABEL_TOP_N > 0) {
-      const sep = document.createElement('option');
-      sep.disabled = true;
-      sep.textContent = '────────────────';
-      sep.style.color = '#ccc';
-      sep.style.fontSize = '0.75rem';
-      sel.appendChild(sep);
-      separatorInserted = true;
-    }
-    const opt = document.createElement('option');
-    opt.value = n;
-    opt.textContent = n;
-    // Restore sticky selection
-    if (modalSelectedTags.has(n)) opt.selected = true;
-    sel.appendChild(opt);
+  // Separate names into frequent vs alpha, only including names that are in the filtered list
+  const visibleTopN = names.filter(n => topNSet.has(n));
+  const visibleAlpha = names.filter(n => !topNSet.has(n));
+
+  // Render frequent section
+  visibleTopN.forEach(n => sel.appendChild(makeOption(n)));
+
+  // Render separator if both sections have visible items
+  if (visibleTopN.length > 0 && visibleAlpha.length > 0) {
+    const sep = document.createElement('option');
+    sep.disabled = true;
+    sep.textContent = '────────────────';
+    sep.style.color = '#ccc';
+    sep.style.fontSize = '0.75rem';
+    sel.appendChild(sep);
+  }
+
+  // Render A–Z section
+  visibleAlpha.forEach(n => sel.appendChild(makeOption(n)));
+}
+
+function makeOption(n) {
+  const opt = document.createElement('option');
+  opt.value = n;
+  opt.textContent = n;
+  if (modalSelectedTags.has(n)) opt.selected = true;
+  return opt;
+}
+
+/** Toggle a single tag in/out of the sticky Set */
+function toggleTag(name, checked) {
+  if (checked) {
+    modalSelectedTags.add(name);
+  } else {
+    modalSelectedTags.delete(name);
+  }
+}
+
+/** onchange handler: diff old Set vs new DOM selection to find what toggled */
+function handleSelectChange(sel) {
+  const visible = new Set(sel.options.map(o => o.value));
+  const currentSelected = new Set(Array.from(sel.selectedOptions).map(o => o.value));
+  // Remove deselected items that are visible in this filter
+  modalSelectedTags.forEach(name => {
+    if (visible.has(name) && !currentSelected.has(name)) modalSelectedTags.delete(name);
   });
+  // Add newly selected items
+  currentSelected.forEach(name => modalSelectedTags.add(name));
 }
 
 function filterLabels(term) {
