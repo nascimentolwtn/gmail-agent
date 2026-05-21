@@ -65,7 +65,9 @@ class EmailDecision:
 # ---------------------------------------------------------------------------
 
 def load_examples(path: str) -> list[dict]:
-    """Load the examples.json file."""
+    """Load the examples.json file. Returns [] if missing or invalid."""
+    if not os.path.exists(path):
+        return []
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     # normalize so each example is a single-item dict (original format allows lists)

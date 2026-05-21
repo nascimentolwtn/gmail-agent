@@ -11,7 +11,7 @@
 
 Ordered by impact and what unblocks what (not conversation order).
 
-- [ ] **[2026-05-20] Missing `examples.json` crashes `tagger_flask`**
+- [x] **[2026-05-20] Missing `examples.json` crashes `tagger_flask`**
   Do instead: `load_examples()` in `auto_tagger.py` (~L67) raises `FileNotFoundError` when file absent; return `[]` instead (or create `examples.json` as `[]` on first use). Dashboard and CLI must start with no training file — zero-shot tagging until user commits first example.
 
 - [ ] **[2026-05-20] FIXME: `pick_labels` / `ordered_labels_for_picker` — `dict` + `list` TypeError**

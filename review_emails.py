@@ -9,9 +9,13 @@ from suggest import suggest_action, format_suggestion
 EXAMPLES_FILE = "examples.json"
 
 def load_examples():
-    if os.path.exists(EXAMPLES_FILE):
-        with open(EXAMPLES_FILE, "r") as f:
-            return json.load(f)
+    if not os.path.exists(EXAMPLES_FILE):
+        return []
+    with open(EXAMPLES_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        return data
+    # Non-list root (e.g. {} or old format) — return empty so we don't crash
     return []
 
 def save_examples(examples):
