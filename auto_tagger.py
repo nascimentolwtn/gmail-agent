@@ -268,12 +268,17 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
     return [], ""
 
 
-def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> tuple[Optional[list[str]], str]:
-    """Fallback: aggregate actions from the top-N most similar examples.
+def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9, label_threshold: float = 0.5) -> tuple[Optional[list[str]], str]:
+    """Fallback: score each label individually by similarity, return all above threshold.
 
-    Uses the same similarity scoring and selection as the LLM path, then picks
-    the highest-weighted action across the top matches. Returns a reason string
-    explaining which past decisions influenced the choice.
+    Unlike the old atomic-action approach, this scores each *label* independently
+    so the same sender can yield different tags depending on subject/body context.
+    Labels whose aggregate similarity score ≥ `label_threshold` × top_label_score
+    are returned, letting multi-label cases surface naturally.
+
+    Delete is only returned when it is the single dominant action (no competing
+    tags within the threshold), since tag-vs-delete ambiguity is better handled
+    by the LLM path.
     """
     if not examples:
         return None, ""
@@ -288,8 +293,9 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> t
     if not relevant:
         return None, ""
 
-    # weight each example's action by its similarity score
-    action_weights: dict[str, float] = {}
+    # score each individual label (not atomic action strings) by similarity
+    label_scores: dict[str, float] = {}
+    delete_score = 0.0
     for ex, score in relevant:
         action = ex.get("action", "")
         if isinstance(action, str):
@@ -297,16 +303,43 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> t
         if isinstance(action, list):
             for a in action:
                 a_str = str(a).strip()
-                if a_str:
-                    action_weights[a_str] = action_weights.get(a_str, 0) + score
+                if not a_str:
+                    continue
+                if a_str.lower() == "delete":
+                    delete_score += score
+                else:
+                    m = re.match(r"^tag:(.+)$", a_str)
+                    name = m.group(1) if m else a_str
+                    label_scores[name] = label_scores.get(name, 0) + score
 
-    if not action_weights:
+    if not label_scores and delete_score == 0:
         return None, ""
 
-    # pick the highest-weighted action
-    best_action = max(action_weights, key=action_weights.get)
+    # sort labels by descending score
+    sorted_labels = sorted(label_scores, key=label_scores.get, reverse=True)  # type: ignore[arg-type]
+    top_score = label_scores[sorted_labels[0]] if sorted_labels else 0.0
 
-    # build reason from the top matching examples
+    # keep labels within threshold of the top score
+    keep_threshold = top_score * label_threshold
+    top_labels = [l for l in sorted_labels if label_scores[l] >= keep_threshold]
+
+    # delete wins only if it outscores all tags combined (strong signal)
+    if delete_score > 0 and delete_score > top_score:
+        top_matches = sorted(relevant, key=lambda pair: pair[1], reverse=True)[:3]
+        match_summaries = []
+        for ex, score in top_matches:
+            ex_from = ex.get("from", "")
+            ex_action = ex.get("action", "")
+            if isinstance(ex_action, list):
+                ex_action = ", ".join(ex_action)
+            match_summaries.append(f"  - From={ex_from!r} → {ex_action} (score={score:.1f})")
+        reason = "Rule-based (delete dominates):\n" + "\n".join(match_summaries)
+        return ["delete"], reason
+
+    if not top_labels:
+        return None, ""
+
+    # build reason from the top matching examples + per-label scores
     top_matches = sorted(relevant, key=lambda pair: pair[1], reverse=True)[:3]
     match_summaries = []
     for ex, score in top_matches:
@@ -315,17 +348,10 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9) -> t
         if isinstance(ex_action, list):
             ex_action = ", ".join(ex_action)
         match_summaries.append(f"  - From={ex_from!r} → {ex_action} (score={score:.1f})")
-    reason = "Rule-based: matched similar past decisions:\n" + "\n".join(match_summaries)
+    label_detail = ", ".join(f"{l}={label_scores[l]:.1f}" for l in top_labels)
+    reason = f"Rule-based similarity scores: {label_detail}\n" + "\n".join(match_summaries)
 
-    # normalise → list of label strings (without "tag:" prefix)
-    if best_action.lower() == "delete":
-        return ["delete"], reason
-
-    m = re.match(r"^tag:(.+)$", best_action)
-    if m:
-        return [m.group(1)], reason
-
-    return None, ""
+    return top_labels, reason
 
 
 def auto_tag_email(

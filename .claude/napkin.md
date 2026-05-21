@@ -69,8 +69,8 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-20] Deduplicate `fetch_emails.py` (in-file only)**
   Fixed: extracted `_message_to_email(service, msg, body_chars)` helper (lines 6–39). Both `get_unread_emails` and `get_unread_emails_paginated` now call it — each keeps its own list/pagination logic. ~40 lines of duplication removed.
 
-- [ ] **[2026-05-20] `auto_tag_email`: LLM similarity over regex for label choice**
-  Do instead: in `auto_tagger.auto_tag_email`, rank/pick labels by similarity to LLM prompt examples first; regex secondary/fallback. Same sender may need tag-then-act when context matters.
+- [x] **[2026-05-20] `auto_tag_email`: LLM similarity over regex for label choice**
+  Fixed: refactored `_rule_based_tag` to score each *label* independently (not atomic actions). Labels within `label_threshold`×(top_score) are all returned, enabling multi-label and same-sender-different-tag behavior. Delete only wins when it outscores all tags combined (strong-signal gate). Per-label scores included in reason string.
 
 - [x] **[2026-05-20] Split HTML/CSS from `tagger_flask.py`**
   Fixed: removed inline `DASHBOARD_HTML` string (~170 lines) and `<style>` block from Python. `tagger_flask.py` now uses `render_template("dashboard.html")` + `static/styles.css`. All JS logic (suggestions, fetch-next, dedup) preserved in template. Fixed missing `import os`. Made `tr.already-processed` visually distinct (blue `#e3f2fd`) from `tr.committed` (green `#e8f5e9`).
