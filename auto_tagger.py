@@ -39,6 +39,7 @@ class EmailDecision:
     snippet: str
     action: Optional[str] = None              # "delete" or list of labels like "tag:LABEL1, tag:LABEL2"
     reasoning: str = ""                      # what the model thought before deciding
+    email_id: str = ""                       # Gmail message id for deduplication
 
     @property
     def is_delete(self) -> bool:
@@ -51,6 +52,8 @@ class EmailDecision:
             "snippet": self.snippet[:200],
             "action": self.action or "",
         }
+        if self.email_id:
+            out["id"] = self.email_id
         if self.reasoning:
             # truncate to ~500 chars so it fits nicely in logs / audits
             out["reasoning"] = (self.reasoning + "...")[:500]
@@ -334,6 +337,7 @@ def auto_tag_email(
     from_field = msg.get("from", "")[:200]
     subject = msg.get("subject", "")[:400].replace("\n", " ")
     snippet = msg.get("snippet", "")
+    email_id = msg.get("id", "")
 
     if not examples:
         # no training data yet — ask model to inspect first few chars only
@@ -355,6 +359,7 @@ def auto_tag_email(
             snippet=snippet,
             action=None,
             reasoning="",
+            email_id=email_id,
         )
 
     # handle delete
@@ -365,6 +370,7 @@ def auto_tag_email(
             snippet=snippet,
             action="delete",
             reasoning=reason,
+            email_id=email_id,
         )
 
     return EmailDecision(
@@ -373,6 +379,7 @@ def auto_tag_email(
         snippet=snippet,
         action=[f"tag:{l}" for l in labels],
         reasoning=reason,
+        email_id=email_id,
     )
 
 

@@ -771,19 +771,41 @@ def api_commit():
                     email_lookup[e["id"]] = e
 
             examples = load_examples("examples.json")
+
+            # Build set of already-processed keys to avoid duplicates
+            seen_ids: set[str] = set()
+            seen_keys: set[tuple[str, str]] = set()
+            for ex in examples:
+                if ex.get("id"):
+                    seen_ids.add(ex["id"])
+                else:
+                    seen_keys.add((ex.get("from", ""), ex.get("subject", "")))
+
             for entry in raw_decisions:
                 email_id = entry.get("email_id", "")
                 action = entry.get("action")
                 if not email_id or not action:
                     continue
+                # Skip if already in examples (prefer id, fall back to from+subject)
                 em = email_lookup.get(email_id, {})
-                examples.append({
+                if email_id and email_id in seen_ids:
+                    continue
+                from_val = em.get("from", "")
+                subject_val = em.get("subject", "")
+                if (from_val, subject_val) in seen_keys:
+                    continue
+                new_entry = {
                     "id": email_id,
-                    "from": em.get("from", ""),
-                    "subject": em.get("subject", ""),
+                    "from": from_val,
+                    "subject": subject_val,
                     "snippet": em.get("body_snippet", ""),
                     "action": action,
-                })
+                }
+                examples.append(new_entry)
+                # Track so subsequent entries in same batch also dedup
+                if email_id:
+                    seen_ids.add(email_id)
+                seen_keys.add((from_val, subject_val))
             save_examples(examples)
         except Exception:
             pass  # don't fail the commit if saving examples fails

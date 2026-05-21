@@ -206,6 +206,7 @@ def run_cli() -> None:
                 snippet=email.get("body_snippet", ""),
                 action="delete",
                 reasoning="User override",
+                email_id=email.get("id", ""),
             )
             confirmed.append((email, override))
             print("  → delete (user override)")
@@ -219,6 +220,7 @@ def run_cli() -> None:
                     snippet=email.get("body_snippet", ""),
                     action=[f"tag:{l}" for l in chosen],
                     reasoning="User selected",
+                    email_id=email.get("id", ""),
                 )
                 confirmed.append((email, override))
                 print(f"  → {', '.join(override.action)}")
@@ -233,7 +235,30 @@ def run_cli() -> None:
 
         tagged, deleted, errors = commit_decisions(confirmed, service, label_map)
 
-        new_entries = [d.as_json() for _, d in confirmed]
+        # Build dedup sets from existing examples
+        seen_ids: set[str] = set()
+        seen_keys: set[tuple[str, str]] = set()
+        for ex in examples:
+            if ex.get("id"):
+                seen_ids.add(ex["id"])
+            else:
+                seen_keys.add((ex.get("from", ""), ex.get("subject", "")))
+
+        new_entries = []
+        for _, d in confirmed:
+            entry = d.as_json()
+            eid = entry.get("id", "")
+            fwd = entry.get("from", "")
+            subj = entry.get("subject", "")
+            if eid and eid in seen_ids:
+                continue
+            if (fwd, subj) in seen_keys:
+                continue
+            new_entries.append(entry)
+            if eid:
+                seen_ids.add(eid)
+            seen_keys.add((fwd, subj))
+
         examples.extend(new_entries)
         save_examples(examples)
 
