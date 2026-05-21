@@ -137,7 +137,7 @@ function buildRow(idx) {
     <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
     <td class="actions">${actionsHtml}</td>
     <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
-  `;
+`;
   return tr;
 }
 
@@ -375,6 +375,7 @@ function updateStats() {
 
 // ── Background polling ──────────────────────────────────────────────────
 let pollTimer = null;
+let bgFetchTimer = null;
 
 function startPolling() {
   pollTimer = setInterval(pollForMore, 2000);
@@ -389,7 +390,7 @@ async function pollForMore() {
       addBatch(data.emails, data.decisions);
     }
 
-    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity);
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, data.fetching);
 
     if (data.done) {
       clearInterval(pollTimer);
@@ -398,11 +399,42 @@ async function pollForMore() {
       // where /api/more returned done but with stale loaded/total
       const statusResp = await fetch('/api/status');
       const status = await statusResp.json();
-      updateLoadingBar(status.loaded, status.total, status.done, status.error, status.last_activity);
+      updateLoadingBar(status.loaded, status.total, status.done, status.error, status.last_activity, status.fetching);
+      updateFetchControl(status);
     }
   } catch (err) {
     // transient network error — keep polling
     console.warn('poll error:', err);
+  }
+}
+
+// ── Background auto-fetch: loads one next batch on page load ──────────────
+let bgFetchRunning = false;
+
+async function startBackgroundFetch() {
+  if (bgFetchRunning) return;
+  bgFetchRunning = true;
+
+  const btn = document.getElementById('btnFetchNext');
+  const spinner = document.getElementById('fetchSpinner');
+  if (btn) btn.disabled = true;
+  if (spinner) spinner.style.display = 'inline-block';
+
+  try {
+    const resp = await fetch('/api/fetch_next', { method: 'POST' });
+    const data = await resp.json();
+
+    if (data.emails && data.emails.length > 0) {
+      addBatch(data.emails, data.decisions);
+    }
+
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, data.fetching);
+  } catch (err) {
+    showToast('Background fetch failed: ' + err, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (spinner) spinner.style.display = 'none';
+    bgFetchRunning = false;
   }
 }
 
@@ -416,23 +448,40 @@ function updateLastActivity(activity) {
   el.textContent = label + ' at ' + timeStr;
 }
 
-function updateLoadingBar(loaded, total, done, error, activity) {
+function updateLoadingBar(loaded, total, done, error, activity, fetching) {
   const bar = document.getElementById('loadingBar');
   const text = document.getElementById('loadingText');
+  const ctrl = document.getElementById('fetchControl');
+  const ctrlText = document.getElementById('fetchControlText');
 
   if (error) {
     bar.className = 'loading-bar error';
     text.textContent = '⚠ Error loading emails: ' + error;
+    if (ctrl) ctrl.style.display = 'none';
     return;
   }
 
   if (done) {
     bar.className = 'loading-bar done';
     text.textContent = `✓ All ${loaded} emails loaded`;
-  } else {
+    if (ctrl) ctrl.style.display = 'none';
+  } else if (fetching) {
     bar.className = 'loading-bar';
-    const totalStr = total > 0 ? ` / ~${total}` : '';
-    text.textContent = `⏳ Loading emails… ${loaded}${totalStr} loaded so far — review while you wait!`;
+    text.textContent = `⏳ Loading emails… ${loaded} loaded so far — review while you wait!`;
+    if (ctrl) {
+      ctrl.style.display = 'flex';
+      if (ctrlText) ctrlText.textContent = 'fetching…';
+    }
+  } else {
+    // Idle: not done, not actively fetching — show status next to the button
+    bar.className = 'loading-bar done';
+    text.textContent = `${loaded} email${loaded !== 1 ? 's' : ''} loaded`;
+    if (ctrl) {
+      ctrl.style.display = 'flex';
+      const remaining = (total > 0) ? total - loaded : '?';
+      const totalStr = total > 0 ? ` of ~${total}` : '';
+      ctrlText.textContent = `${loaded}${totalStr} loaded — ${remaining} remaining — click "Load next batch" to fetch more`;
+    }
   }
   if (activity) updateLastActivity(activity);
 }
@@ -475,8 +524,7 @@ async function fetchNextBatch() {
     if (data.emails && data.emails.length > 0) {
       addBatch(data.emails, data.decisions);
     }
-    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity);
-    updateFetchControl(data);
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, data.fetching);
   } catch (err) {
     showToast('Fetch failed: ' + err, 'error');
   } finally {
@@ -485,17 +533,6 @@ async function fetchNextBatch() {
   }
 }
 
-function updateFetchControl(data) {
-  const ctrl = document.getElementById('fetchControl');
-  const text = document.getElementById('fetchControlText');
-  if (data.all_fetched || data.done) {
-    ctrl.style.display = 'none';
-  } else {
-    ctrl.style.display = 'flex';
-    const remaining = (data.total > 0) ? data.total - data.loaded : '?';
-    text.textContent = data.loaded + ' loaded' + (data.total > 0 ? ' of ~' + data.total : '') + ' — ' + remaining + ' remaining';
-  }
-}
 
 // ── Init ─────────────────────────────────────────────────────────────────
 async function init() {
@@ -512,10 +549,13 @@ async function init() {
   fetch('/api/status')
     .then(r => r.json())
     .then(s => {
-      updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity);
+      updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity, s.fetching);
       updateFetchControl(s);
     })
-    .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null));
+    .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null, null, false));
+
+  // Kick off one background fetch so the user has more rows ready
+  startBackgroundFetch();
 }
 
 init();

@@ -48,6 +48,7 @@ _fetch_state: dict = {
     "last_activity": None,    # {action: str, ts: ISO-8601 UTC string}
     "background_fetch_started": False,
     "next_page_token": None,   # stored so /api/fetch_next can resume
+    "fetching": False,         # True while a fetch HTTP request is in flight
     "all_fetched": False,      # true when no more pages
 }
 
@@ -261,6 +262,7 @@ def api_status():
             "loaded": _fetch_state["loaded"],
             "total": _fetch_state["total"],
             "error": _fetch_state["error"],
+            "fetching": _fetch_state["fetching"],
             "last_activity": _fetch_state.get("last_activity"),
         })
 
@@ -285,6 +287,7 @@ def api_more():
                 "total": _fetch_state["total"],
                 "done": _fetch_state["done"],
                 "error": _fetch_state["error"],
+                "fetching": _fetch_state["fetching"],
             })
 
         # Flatten all unseen batches into one response
@@ -303,6 +306,7 @@ def api_more():
             "total": _fetch_state["total"],
             "done": _fetch_state["done"],
             "error": _fetch_state["error"],
+            "fetching": _fetch_state["fetching"],
             "last_activity": _fetch_state.get("last_activity"),
         })
 
@@ -315,80 +319,86 @@ def api_fetch_next():
     the response will be empty with done=true.
     """
     with _fetch_lock:
+        _fetch_state["fetching"] = True
         page_token = _fetch_state.get("next_page_token")
         all_fetched = _fetch_state.get("all_fetched", False)
 
-    if all_fetched or not page_token:
-        with _fetch_lock:
-            _fetch_state["done"] = True
-        return jsonify({
-            "emails": [], "decisions": [],
-            "loaded": _fetch_state["loaded"],
-            "total": _fetch_state["total"],
-            "done": True,
-            "all_fetched": True,
-        })
+    try:
+        if all_fetched or not page_token:
+            with _fetch_lock:
+                _fetch_state["done"] = True
+            return jsonify({
+                "emails": [], "decisions": [],
+                "loaded": _fetch_state["loaded"],
+                "total": _fetch_state["total"],
+                "done": True,
+                "all_fetched": True,
+                "fetching": False,
+            })
 
-    service = get_gmail_service()
-    examples = load_examples("examples.json")
-    label_map = load_labels(service)
+        service = get_gmail_service()
+        examples = load_examples("examples.json")
+        label_map = load_labels(service)
 
-    emails, _, total, next_token = get_unread_emails_paginated(
-        service, page_token=page_token, batch_size=BATCH_SIZE
-    )
+        emails, _, total, next_token = get_unread_emails_paginated(
+            service, page_token=page_token, batch_size=BATCH_SIZE
+        )
 
-    # Tag each email and persist suggestions
-    decisions = []
-    pending_updates = {}
-    for email in emails:
-        msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
-        decision = auto_tag_email(msg_for_tagging, examples, label_map)
-        decisions.append({
-            "action": decision.action,
-            "reasoning": decision.reasoning,
-        })
-        if decision.action:
-            pending_updates[email["id"]] = {
+        # Tag each email and persist suggestions
+        decisions = []
+        pending_updates = {}
+        for email in emails:
+            msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
+            decision = auto_tag_email(msg_for_tagging, examples, label_map)
+            decisions.append({
                 "action": decision.action,
                 "reasoning": decision.reasoning,
+            })
+            if decision.action:
+                pending_updates[email["id"]] = {
+                    "action": decision.action,
+                    "reasoning": decision.reasoning,
+                }
+
+        # Merge into pending_suggestions.json
+        if pending_updates:
+            existing = _load_pending_suggestions()
+            existing.update(pending_updates)
+            _save_pending_suggestions(existing)
+
+        with _fetch_lock:
+            _fetch_state["batches"].append(([{
+                "id": e["id"],
+                "from": e["from"],
+                "subject": e["subject"],
+                "body_snippet": e.get("body_snippet", "")[:150],
+            } for e in emails], decisions))
+            _fetch_state["loaded"] += len(emails)
+            _fetch_state["next_page_token"] = next_token
+            _fetch_state["all_fetched"] = next_token is None
+            _fetch_state["done"] = next_token is None
+            _fetch_state["last_activity"] = {
+                "action": "fetch_batch",
+                "ts": datetime.now(timezone.utc).isoformat(),
             }
 
-    # Merge into pending_suggestions.json
-    if pending_updates:
-        existing = _load_pending_suggestions()
-        existing.update(pending_updates)
-        _save_pending_suggestions(existing)
-
-    with _fetch_lock:
-        _fetch_state["batches"].append(([{
-            "id": e["id"],
-            "from": e["from"],
-            "subject": e["subject"],
-            "body_snippet": e.get("body_snippet", "")[:150],
-        } for e in emails], decisions))
-        _fetch_state["loaded"] += len(emails)
-        _fetch_state["next_page_token"] = next_token
-        _fetch_state["all_fetched"] = next_token is None
-        _fetch_state["done"] = next_token is None
-        _fetch_state["last_activity"] = {
-            "action": "fetch_batch",
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-
-    return jsonify({
-        "emails": [{
-            "id": e["id"],
-            "from": e["from"],
-            "subject": e["subject"],
-            "body_snippet": e.get("body_snippet", "")[:150],
-        } for e in emails],
-        "decisions": decisions,
-        "loaded": _fetch_state["loaded"],
-        "total": _fetch_state["total"],
-        "done": _fetch_state["done"],
-        "all_fetched": _fetch_state["all_fetched"],
-        "last_activity": _fetch_state["last_activity"],
-    })
+        return jsonify({
+            "emails": [{
+                "id": e["id"],
+                "from": e["from"],
+                "subject": e["subject"],
+                "body_snippet": e.get("body_snippet", "")[:150],
+            } for e in emails],
+            "decisions": decisions,
+            "loaded": _fetch_state["loaded"],
+            "total": _fetch_state["total"],
+            "done": _fetch_state["done"],
+            "all_fetched": _fetch_state["all_fetched"],
+            "last_activity": _fetch_state["last_activity"],
+        })
+    finally:
+        with _fetch_lock:
+            _fetch_state["fetching"] = False
 
 
 @app.route("/api/suggestions")
