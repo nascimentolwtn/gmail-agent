@@ -11,6 +11,12 @@
 
 Ordered by impact and what unblocks what (not conversation order).
 
+- [ ] **[2026-05-20] Missing `examples.json` crashes `tagger_flask`**
+  Do instead: `load_examples()` in `auto_tagger.py` (~L67) raises `FileNotFoundError` when file absent; return `[]` instead (or create `examples.json` as `[]` on first use). Dashboard and CLI must start with no training file — zero-shot tagging until user commits first example.
+
+- [ ] **[2026-05-20] FIXME: `pick_labels` / `ordered_labels_for_picker` — `dict` + `list` TypeError**
+  Do instead: `review_emails.py` ~L30 `examples + session_decisions` crashes when `examples.json` is a JSON object (e.g. `{}`) not a list. Normalize in all loaders (`review_emails.load_examples`, `auto_tagger.load_examples`): missing file → `[]`, non-list root → `[]` or migrate. Repro: `review_emails` action `t` → `pick_labels` → `get_recent_labels`.
+
 - [x] **[2026-05-20] Fix `tagger_flask` commit → `examples.json` placeholders**
   Do instead: in `/commit` (~L762–776), stop appending hardcoded `"from": "(web)"`, `"subject": "(web)"`, `"snippet": ""`. Resolve each `email_id` from `raw_decisions` against session `EMAILS` (or re-fetch) and persist real `from`, `subject`, `snippet`, plus `id`/`email_id`.
 
