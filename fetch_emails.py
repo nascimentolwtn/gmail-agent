@@ -98,6 +98,63 @@ def strip_html(html):
     return text.strip()
 
 
+def get_unread_emails_paginated(service, page_token=None, batch_size=20, body_chars=300):
+    """Fetch one page of unread emails.
+
+    Returns (emails, unreadable, total, next_page_token).
+    When next_page_token is None there are no more pages.
+    """
+    kwargs = dict(userId="me", q="is:unread", maxResults=batch_size)
+    if page_token:
+        kwargs["pageToken"] = page_token
+
+    results = service.users().messages().list(**kwargs).execute()
+    messages = results.get("messages", [])
+    next_page_token = results.get("nextPageToken")
+    total = results.get("resultSizeEstimate", 0)
+
+    emails = []
+    unreadable = 0
+
+    for msg in messages:
+        full = service.users().messages().get(
+            userId="me",
+            id=msg["id"],
+            format="full",
+        ).execute()
+
+        headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
+        result = find_text_part(full["payload"])
+
+        if not result:
+            snippet = full.get("snippet", "").strip()
+            if snippet:
+                body_snippet = snippet[:body_chars]
+            else:
+                unreadable += 1
+                continue
+        else:
+            data, transfer_enc, mime_type = result
+            try:
+                full_body = decode_part(data, transfer_enc)
+                if mime_type == "text/html":
+                    full_body = strip_html(full_body)
+                body_snippet = full_body[:body_chars].strip()
+            except Exception as e:
+                body_snippet = full.get("snippet", f"[Decode error: {e}]")[:body_chars]
+
+        emails.append({
+            "id": msg["id"],
+            "from": headers.get("From", ""),
+            "subject": headers.get("Subject", ""),
+            "date": headers.get("Date", ""),
+            "body_snippet": body_snippet,
+            "labels": full.get("labelIds", []),
+        })
+
+    return emails, unreadable, total, next_page_token
+
+
 if __name__ == "__main__":
     service = get_gmail_service()
     emails, unreadable, total = get_unread_emails(service, max_results=100, body_chars=200)

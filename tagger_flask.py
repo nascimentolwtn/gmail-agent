@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-# tagger_flask.py — Flask web interface for Gmail auto-tagging
+# tagger_flask.py — Flask web interface for Gmail auto-tagger with background loading
 
 """
 Web UI for reviewing and committing auto-tag suggestions.
+Emails are fetched in small batches so the user can start reviewing
+the first batch while the rest load in the background.
 
 Routes:
-  GET  /              — Dashboard (unread emails + suggestions)
+  GET  /              — Dashboard (first batch rendered immediately)
+  GET  /api/status    — JSON: {done, loaded, total} progress info
+  GET  /api/more      — JSON: next batch of emails+decisions for the frontend
   GET  /api/labels    — JSON: available Gmail labels
-  POST /api/suggest   — JSON: auto-tag suggestions for all unread emails
   POST /api/commit    — JSON: apply confirmed decisions to Gmail API
 
 Run:  python tagger_flask.py
@@ -17,20 +20,106 @@ Open: http://localhost:5050
 from __future__ import annotations
 
 import json
-import os
+import threading
 from typing import Optional
 
 from flask import Flask, request, jsonify, render_template_string
 
 from auth_test import get_gmail_service
-from fetch_emails import get_unread_emails
-from auto_tagger import auto_tag_email, load_examples, EmailDecision
+from fetch_emails import get_unread_emails_paginated
+from auto_tagger import auto_tag_email, load_examples
 from review_emails import load_labels, save_examples
 
 app = Flask(__name__)
 
 # ---------------------------------------------------------------------------
-# HTML template (inline — no template directory needed)
+# Shared background-fetch state (protected by a lock)
+# ---------------------------------------------------------------------------
+_fetch_lock = threading.Lock()
+_fetch_state: dict = {
+    "done": False,
+    "total": 0,               # Gmail's resultSizeEstimate
+    "loaded": 0,              # how many emails we've fetched + tagged so far
+    "batches": [],            # list of (email_dict_list, decision_dict_list) tuples
+    "error": None,
+    "last_served_idx": 0,     # index into batches for /api/more cursor
+}
+
+BATCH_SIZE = 20              # emails per background batch
+
+
+def _reset_fetch_state() -> None:
+    """Clear shared state before a new fetch cycle."""
+    with _fetch_lock:
+        _fetch_state.update({
+            "done": False,
+            "total": 0,
+            "loaded": 0,
+            "batches": [],
+            "error": None,
+            "last_served_idx": 0,
+        })
+
+
+def _background_fetch(service, examples: list, label_map: dict, total_expected: int) -> None:
+    """Fetch remaining batches in a background thread.
+
+    The first batch is already done by the time this starts, so we
+    continue from page_token returned by the paginated fetcher.
+    """
+    page_token: Optional[str] = None
+    first_batch_done = True  # the dashboard route already did batch 0
+
+    try:
+        while True:
+            emails, _, total, next_token = get_unread_emails_paginated(
+                service,
+                page_token=page_token,
+                batch_size=BATCH_SIZE,
+            )
+
+            if not emails and not first_batch_done:
+                break
+
+            # Tag each email
+            decisions = []
+            for email in emails:
+                msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
+                decision = auto_tag_email(msg_for_tagging, examples, label_map)
+                decisions.append({
+                    "action": decision.action,
+                    "reasoning": decision.reasoning,
+                })
+
+            with _fetch_lock:
+                _fetch_state["batches"].append((
+                    [{
+                        "id": e["id"],
+                        "from": e["from"],
+                        "subject": e["subject"],
+                        "body_snippet": e.get("body_snippet", "")[:150],
+                    } for e in emails],
+                    decisions,
+                ))
+                _fetch_state["loaded"] += len(emails)
+                if total_expected == 0:
+                    _fetch_state["total"] = total
+
+            if not next_token:
+                break
+            page_token = next_token
+            first_batch_done = False
+
+    except Exception as exc:
+        with _fetch_lock:
+            _fetch_state["error"] = str(exc)
+    finally:
+        with _fetch_lock:
+            _fetch_state["done"] = True
+
+
+# ---------------------------------------------------------------------------
+# HTML template
 # ---------------------------------------------------------------------------
 
 DASHBOARD_HTML = """\
@@ -55,6 +144,15 @@ DASHBOARD_HTML = """\
     .btn-refresh { background: #fff; color: #333; border: 1px solid #ddd; }
     .btn-refresh:hover { background: #f0f0f0; }
     .stats { font-size: 0.85rem; color: #666; }
+    .loading-bar { margin-bottom: 12px; padding: 8px 14px; background: #e8f0fe;
+                   border-radius: 6px; font-size: 0.85rem; color: #1a73e8;
+                   display: flex; align-items: center; gap: 8px; }
+    .loading-bar.done { background: #e6f4ea; color: #34a853; }
+    .loading-bar.error { background: #fce8e6; color: #c5221f; }
+    .spinner { width: 14px; height: 14px; border: 2px solid #1a73e8; border-top-color: transparent;
+               border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .loading-bar.done .spinner { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     table { width: 100%; border-collapse: collapse; background: #fff;
             border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
     th { background: #1a73e8; color: #fff; padding: 10px 12px; text-align: left;
@@ -127,6 +225,12 @@ DASHBOARD_HTML = """\
 <h1>📬 Gmail Auto-Tagger</h1>
 <p class="subtitle">Review auto-suggested tags, adjust, then commit to your Gmail account.</p>
 
+<!-- Loading / progress bar -->
+<div class="loading-bar" id="loadingBar">
+  <div class="spinner" id="spinner"></div>
+  <span id="loadingText">Loading emails…</span>
+</div>
+
 <div class="toolbar">
   <button class="btn-commit" id="btnCommit" onclick="commitAll()" disabled>
     ✓ Commit All
@@ -169,52 +273,84 @@ DASHBOARD_HTML = """\
 <div class="toast" id="toast"></div>
 
 <script>
-// ── Data injected by server ──────────────────────────────────────────────
-const EMAILS = {{ emails_json | safe }};
+// ── Data injected by server (first batch only) ───────────────────────────
+const INITIAL_EMAILS = {{ emails_json | safe }};
 const LABELS = {{ labels_json | safe }};
 
 // ── State ────────────────────────────────────────────────────────────────
 // Each row: { status: 'pending'|'accepted'|'delete'|'tagged'|'skipped'|'committed',
 //             action: null|'delete'|['tag:LABEL',...] }
-const state = [];
+const EMAILS = [];      // { id, from, subject, body_snippet }
+const DECISIONS = [];   // { action, reasoning }
+const state = [];       // per-row UI state
 
-// ── Init ─────────────────────────────────────────────────────────────────
-function init() {
+// ── Helpers ──────────────────────────────────────────────────────────────
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function formatSuggestionBadge(action) {
+  if (!action) return '<span class="badge badge-none">—</span>';
+  if (action === 'delete') return '<span class="badge badge-delete">🗑 delete</span>';
+  if (Array.isArray(action)) {
+    const labels = action.map(a => a.replace('tag:', '')).join(', ');
+    return `<span class="badge badge-tag">🏷 ${escHtml(labels)}</span>`;
+  }
+  return `<span class="badge badge-tag">🏷 ${escHtml(action)}</span>`;
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show toast-' + type;
+  setTimeout(() => { t.className = 'toast'; }, 4000);
+}
+
+// ── Build a table row for one email ──────────────────────────────────────
+function buildRow(idx) {
+  const email = EMAILS[idx];
+  const decision = DECISIONS[idx];
+  const tr = document.createElement('tr');
+  tr.id = 'row-' + idx;
+
+  const suggestionBadge = formatSuggestionBadge(decision.action);
+  const reasoning = (decision.reasoning || '').substring(0, 120);
+
+  tr.innerHTML = `
+    <td>${idx + 1}</td>
+    <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
+    <td class="subject" title="${escHtml(email.subject)}">${escHtml(email.subject)}</td>
+    <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
+    <td>${suggestionBadge}</td>
+    <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
+    <td class="actions">
+      <button class="btn-accept" onclick="acceptRow(${idx})">✓</button>
+      <button class="btn-delete" onclick="deleteRow(${idx})">🗑</button>
+      <button class="btn-pick"   onclick="openTagModal(${idx})">🏷</button>
+      <button class="btn-skip"   onclick="skipRow(${idx})">→</button>
+    </td>
+    <td class="status status-pending" id="status-${idx}">pending</td>
+  `;
+  return tr;
+}
+
+// ── Add a batch of emails to the table ───────────────────────────────────
+function addBatch(emails, decisions) {
   const tbody = document.getElementById('emailTable');
-  tbody.innerHTML = '';
+  const startIdx = EMAILS.length;
 
-  EMAILS.forEach((item, idx) => {
-    const email = item.email;
-    const decision = item.decision;
-    // Default state from server suggestion
-    const hasSuggestion = decision.action !== null && decision.action !== '';
-    state[idx] = {
+  emails.forEach((email, i) => {
+    const idx = startIdx + i;
+    EMAILS.push(email);
+    DECISIONS.push(decisions[i]);
+    const hasSuggestion = decisions[i].action !== null && decisions[i].action !== '';
+    state.push({
       status: hasSuggestion ? 'pending' : 'skipped',
-      action: hasSuggestion ? decision.action : null,
-    };
-
-    const tr = document.createElement('tr');
-    tr.id = 'row-' + idx;
-
-    const suggestionBadge = formatSuggestionBadge(decision.action);
-    const reasoning = (decision.reasoning || '').substring(0, 120);
-
-    tr.innerHTML = `
-      <td>${idx + 1}</td>
-      <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
-      <td class="subject" title="${escHtml(email.subject)}">${escHtml(email.subject)}</td>
-      <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
-      <td>${suggestionBadge}</td>
-      <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
-      <td class="actions">
-        <button class="btn-accept" onclick="acceptRow(${idx})">✓</button>
-        <button class="btn-delete" onclick="deleteRow(${idx})">🗑</button>
-        <button class="btn-pick"   onclick="openTagModal(${idx})">🏷</button>
-        <button class="btn-skip"   onclick="skipRow(${idx})">→</button>
-      </td>
-      <td class="status status-pending" id="status-${idx}">pending</td>
-    `;
-    tbody.appendChild(tr);
+      action: hasSuggestion ? decisions[i].action : null,
+    });
+    tbody.appendChild(buildRow(idx));
   });
 
   updateStats();
@@ -222,7 +358,7 @@ function init() {
 
 // ── Row actions ──────────────────────────────────────────────────────────
 function acceptRow(idx) {
-  state[idx] = { status: 'accepted', action: EMAILS[idx].decision.action };
+  state[idx] = { status: 'accepted', action: DECISIONS[idx].action };
   updateRowUI(idx);
 }
 
@@ -287,7 +423,7 @@ async function commitAll() {
     if (s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged') {
       if (s.action) {
         decisions.push({
-          email_id: EMAILS[idx].email.id,
+          email_id: EMAILS[idx].id,
           action: s.action,
         });
       }
@@ -333,41 +469,85 @@ async function commitAll() {
   }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-function formatSuggestionBadge(action) {
-  if (!action) return '<span class="badge badge-none">—</span>';
-  if (action === 'delete') return '<span class="badge badge-delete">🗑 delete</span>';
-  if (Array.isArray(action)) {
-    const labels = action.map(a => a.replace('tag:', '')).join(', ');
-    return `<span class="badge badge-tag">🏷 ${escHtml(labels)}</span>`;
-  }
-  return `<span class="badge badge-tag">🏷 ${escHtml(action)}</span>`;
-}
-
-function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
+// ── Stats ────────────────────────────────────────────────────────────────
 function updateStats() {
   const total = state.length;
-  const pending = state.filter(s => s.status === 'pending' || s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged').length;
+  const pending = state.filter(s =>
+    s.status === 'pending' || s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged'
+  ).length;
   const skipped = state.filter(s => s.status === 'skipped').length;
   const committed = state.filter(s => s.status === 'committed').length;
   document.getElementById('stats').textContent =
-    `${total} emails | ${pending} ready | ${skipped} skipped | ${committed} committed`;
+    `${total} emails loaded | ${pending} ready | ${skipped} skipped | ${committed} committed`;
   document.getElementById('btnCommit').disabled = pending === 0;
 }
 
-function showToast(msg, type) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = 'toast show toast-' + type;
-  setTimeout(() => { t.className = 'toast'; }, 4000);
+// ── Background polling ──────────────────────────────────────────────────
+let pollTimer = null;
+
+function startPolling() {
+  pollTimer = setInterval(pollForMore, 2000);
 }
 
-// Start
+async function pollForMore() {
+  try {
+    const resp = await fetch('/api/more');
+    const data = await resp.json();
+
+    if (data.emails && data.emails.length > 0) {
+      addBatch(data.emails, data.decisions);
+    }
+
+    updateLoadingBar(data.loaded, data.total, data.done, data.error);
+
+    if (data.done) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  } catch (err) {
+    // transient network error — keep polling
+    console.warn('poll error:', err);
+  }
+}
+
+function updateLoadingBar(loaded, total, done, error) {
+  const bar = document.getElementById('loadingBar');
+  const text = document.getElementById('loadingText');
+
+  if (error) {
+    bar.className = 'loading-bar error';
+    text.textContent = '⚠ Error loading emails: ' + error;
+    return;
+  }
+
+  if (done) {
+    bar.className = 'loading-bar done';
+    text.textContent = `✓ All ${loaded} emails loaded`;
+  } else {
+    bar.className = 'loading-bar';
+    const totalStr = total > 0 ? ` / ~${total}` : '';
+    text.textContent = `⏳ Loading emails… ${loaded}${totalStr} loaded so far — review while you wait!`;
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+function init() {
+  // Populate initial batch
+  addBatch(
+    INITIAL_EMAILS.map(e => e.email),
+    INITIAL_EMAILS.map(e => e.decision),
+  );
+
+  // Populate label picker
+  // (LABELS already available from server template)
+
+  // Show initial loading state
+  updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null);
+
+  // Start polling for background batches
+  startPolling();
+}
+
 init();
 </script>
 </body>
@@ -381,18 +561,29 @@ init();
 
 @app.route("/")
 def dashboard():
-    """Render the main dashboard with unread emails and suggestions."""
+    """Render the main dashboard with the first batch of emails.
+
+    Fetches the first batch synchronously so the page has data immediately,
+    then kicks off a background thread to fetch the rest.
+    """
     service = get_gmail_service()
     examples = load_examples("examples.json")
     label_map = load_labels(service)
-    emails, unreadable, total = get_unread_emails(service, max_results=50)
 
-    # Build email+decision data for the template
-    emails_data = []
-    for email in emails:
+    # Reset shared state
+    _reset_fetch_state()
+
+    # Fetch first batch synchronously (fast — only BATCH_SIZE emails)
+    first_batch, _, total, next_token = get_unread_emails_paginated(
+        service, page_token=None, batch_size=BATCH_SIZE
+    )
+
+    # Tag the first batch
+    first_emails_data = []
+    for email in first_batch:
         msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
         decision = auto_tag_email(msg_for_tagging, examples, label_map)
-        emails_data.append({
+        first_emails_data.append({
             "email": {
                 "id": email["id"],
                 "from": email["from"],
@@ -405,14 +596,92 @@ def dashboard():
             },
         })
 
+    # Store first batch in shared state
+    with _fetch_lock:
+        _fetch_state["total"] = total
+        _fetch_state["loaded"] = len(first_batch)
+        _fetch_state["batches"].append((
+            [{
+                "id": e["id"],
+                "from": e["from"],
+                "subject": e["subject"],
+                "body_snippet": e.get("body_snippet", "")[:150],
+            } for e in first_batch],
+            [{"action": d["decision"]["action"], "reasoning": d["decision"]["reasoning"]}
+             for d in first_emails_data],
+        ))
+
+    # Kick off background thread for remaining batches
+    if next_token:
+        t = threading.Thread(
+            target=_background_fetch,
+            args=(service, examples, label_map, total),
+            daemon=True,
+        )
+        t.start()
+
     # Labels for the tag picker
     label_list = [{"name": k, "id": v} for k, v in label_map.items()]
 
     return render_template_string(
         DASHBOARD_HTML,
-        emails_json=json.dumps(emails_data, ensure_ascii=False),
+        emails_json=json.dumps(first_emails_data, ensure_ascii=False),
         labels_json=json.dumps(label_list, ensure_ascii=False),
+        total_json=json.dumps(total),
     )
+
+
+@app.route("/api/status")
+def api_status():
+    """Return current loading progress."""
+    with _fetch_lock:
+        return jsonify({
+            "done": _fetch_state["done"],
+            "loaded": _fetch_state["loaded"],
+            "total": _fetch_state["total"],
+            "error": _fetch_state["error"],
+        })
+
+
+@app.route("/api/more")
+def api_more():
+    """Return the next batch of emails+decisions that the client hasn't seen yet.
+
+    The client polls this endpoint; each call returns whatever new batches
+    have been fetched since the last call.
+    """
+    with _fetch_lock:
+        batches = _fetch_state["batches"]
+        last_idx = _fetch_state["last_served_idx"]
+
+        if last_idx >= len(batches):
+            # No new batches since last poll
+            return jsonify({
+                "emails": [],
+                "decisions": [],
+                "loaded": _fetch_state["loaded"],
+                "total": _fetch_state["total"],
+                "done": _fetch_state["done"],
+                "error": _fetch_state["error"],
+            })
+
+        # Flatten all unseen batches into one response
+        all_emails = []
+        all_decisions = []
+        for email_list, decision_list in batches[last_idx:]:
+            all_emails.extend(email_list)
+            all_decisions.extend(decision_list)
+
+        _fetch_state["last_served_idx"] = len(batches)
+
+        return jsonify({
+            "emails": all_emails,
+            "decisions": all_decisions,
+            "loaded": _fetch_state["loaded"],
+            "total": _fetch_state["total"],
+            "done": _fetch_state["done"],
+            "error": _fetch_state["error"],
+        })
 
 
 @app.route("/api/labels")
@@ -421,34 +690,6 @@ def api_labels():
     service = get_gmail_service()
     label_map = load_labels(service)
     return jsonify({"labels": [{"name": k, "id": v} for k, v in label_map.items()]})
-
-
-@app.route("/api/suggest", methods=["POST"])
-def api_suggest():
-    """Return auto-tag suggestions for all unread emails (JSON)."""
-    service = get_gmail_service()
-    examples = load_examples("examples.json")
-    label_map = load_labels(service)
-    emails, unreadable, total = get_unread_emails(service, max_results=50)
-
-    results = []
-    for email in emails:
-        msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
-        decision = auto_tag_email(msg_for_tagging, examples, label_map)
-        results.append({
-            "email": {
-                "id": email["id"],
-                "from": email["from"],
-                "subject": email["subject"],
-                "body_snippet": email.get("body_snippet", "")[:150],
-            },
-            "suggestion": {
-                "action": decision.action,
-                "reasoning": decision.reasoning,
-            },
-        })
-
-    return jsonify({"emails": results, "total": total, "unreadable": unreadable})
 
 
 @app.route("/api/commit", methods=["POST"])
@@ -527,7 +768,6 @@ def api_commit():
                 action = entry.get("action")
                 if not email_id or not action:
                     continue
-                # We don't have full email metadata here, store what we can
                 examples.append({
                     "from": "(web)",
                     "subject": "(web)",

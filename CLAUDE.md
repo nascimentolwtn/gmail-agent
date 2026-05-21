@@ -37,6 +37,9 @@ Both [credentials.json](file:///home/lw_na/git/gmail-agent/credentials.json) and
 2. Run `python auth_test.py` to authenticate and test the flow
 3. For integration testing, use [fetch_gmail_labels.py](file:///home/lw_na/git/gmail-agent/fetch_gmail_labels.py) as a reference implementation
 
+### Backlog
+Tracked in [.claude/napkin.md](.claude/napkin.md) under **Backlog (Claude Code)**. Read and update checkboxes there when starting or finishing work.
+
 ### Key Dependencies
 - **google-api-python-client**: Official Gmail API Python client
 - **google-auth-oauthlib**: OAuth 2.0 authorization flow helpers
