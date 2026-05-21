@@ -14,7 +14,7 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-20] Missing `examples.json` crashes `tagger_flask`**
   Do instead: `load_examples()` in `auto_tagger.py` (~L67) raises `FileNotFoundError` when file absent; return `[]` instead (or create `examples.json` as `[]` on first use). Dashboard and CLI must start with no training file — zero-shot tagging until user commits first example.
 
-- [ ] **[2026-05-20] FIXME: `pick_labels` / `ordered_labels_for_picker` — `dict` + `list` TypeError**
+- [x] **[2026-05-20] FIXME: `pick_labels` / `ordered_labels_for_picker` — `dict` + `list` TypeError**
   Do instead: `review_emails.py` ~L30 `examples + session_decisions` crashes when `examples.json` is a JSON object (e.g. `{}`) not a list. Normalize in all loaders (`review_emails.load_examples`, `auto_tagger.load_examples`): missing file → `[]`, non-list root → `[]` or migrate. Repro: `review_emails` action `t` → `pick_labels` → `get_recent_labels`.
 
 - [x] **[2026-05-20] Fix `tagger_flask` commit → `examples.json` placeholders**
@@ -45,11 +45,11 @@ Ordered by impact and what unblocks what (not conversation order).
 
 - [x] **[2026-05-20] Tag picker UX (`tagger_flask` + `tagger_cli`)**
   Improve manual tagging: use LLM suggestions in the picker, filter in modal, shared label ordering.
-  - [ ] **1) Pre-fill suggested tags in `tagger_flask` Pick modal**
+  - [x] **1) Pre-fill suggested tags in `tagger_flask` Pick modal**
     Do instead: on `openTagModal(idx)`, pre-select options from `DECISIONS[idx].action` (`tag:…` labels). User sees the same tags the auto-suggester proposed before confirming or editing.
-  - [ ] **2) Filter labels in Flask tag modal**
+  - [x] **2) Filter labels in Flask tag modal**
     Do instead: add search/filter input on `#tagModal` (like CLI `pick_labels` filter step in `review_emails.py`); narrow `<select>` options as user types.
-  - [ ] **3) Order labels: top-N frequent, then A–Z**
+  - [x] **3) Order labels: top-N frequent, then A–Z**
     Do instead: extract shared helper from `get_recent_labels` + sort (e.g. `ordered_labels_for_picker(examples, session, label_map, top_n=9)`): top-N by usage in `examples.json` + session first, remaining labels alphabetical. Use in `pick_labels()` (`tagger_cli`) and when building `LABELS` / `openTagModal` (`tagger_flask`).
   Do instead (parent): reuse `review_emails` ordering/filter logic in both interfaces so tag picking matches CLI behavior.
 
