@@ -3,6 +3,42 @@ import base64
 import quopri
 from auth_test import get_gmail_service
 
+def _message_to_email(service, msg, body_chars):
+    """Fetch one message by id and return an email dict, or None if unreadable."""
+    full = service.users().messages().get(
+        userId="me",
+        id=msg["id"],
+        format="full",
+    ).execute()
+
+    headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
+    result = find_text_part(full["payload"])
+
+    if not result:
+        snippet = full.get("snippet", "").strip()
+        if not snippet:
+            return None
+        body_snippet = snippet[:body_chars]
+    else:
+        data, transfer_enc, mime_type = result
+        try:
+            full_body = decode_part(data, transfer_enc)
+            if mime_type == "text/html":
+                full_body = strip_html(full_body)
+            body_snippet = full_body[:body_chars].strip()
+        except Exception as e:
+            body_snippet = full.get("snippet", f"[Decode error: {e}]")[:body_chars]
+
+    return {
+        "id": msg["id"],
+        "from": headers.get("From", ""),
+        "subject": headers.get("Subject", ""),
+        "date": headers.get("Date", ""),
+        "body_snippet": body_snippet,
+        "labels": full.get("labelIds", []),
+    }
+
+
 def get_unread_emails(service, max_results=50, body_chars=300):
     results = service.users().messages().list(
         userId="me",
@@ -15,42 +51,11 @@ def get_unread_emails(service, max_results=50, body_chars=300):
     unreadable = 0
 
     for msg in messages:
-        full = service.users().messages().get(
-            userId="me",
-            id=msg["id"],
-            format="full"
-        ).execute()
-
-        headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
-
-        result = find_text_part(full["payload"])
-
-        if not result:
-            # Last resort: use Gmail's own pre-extracted snippet
-            snippet = full.get("snippet", "").strip()
-            if snippet:
-                body_snippet = snippet[:body_chars]
-            else:
-                unreadable += 1
-                continue
+        email = _message_to_email(service, msg, body_chars)
+        if email is None:
+            unreadable += 1
         else:
-            data, transfer_enc, mime_type = result
-            try:
-                full_body = decode_part(data, transfer_enc)
-                if mime_type == "text/html":
-                    full_body = strip_html(full_body)
-                body_snippet = full_body[:body_chars].strip()
-            except Exception as e:
-                body_snippet = full.get("snippet", f"[Decode error: {e}]")[:body_chars]
-
-        emails.append({
-            "id": msg["id"],
-            "from": headers.get("From", ""),
-            "subject": headers.get("Subject", ""),
-            "date": headers.get("Date", ""),
-            "body_snippet": body_snippet,
-            "labels": full.get("labelIds", [])
-        })
+            emails.append(email)
 
     total = len(messages)
     return emails, unreadable, total
@@ -117,40 +122,11 @@ def get_unread_emails_paginated(service, page_token=None, batch_size=20, body_ch
     unreadable = 0
 
     for msg in messages:
-        full = service.users().messages().get(
-            userId="me",
-            id=msg["id"],
-            format="full",
-        ).execute()
-
-        headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
-        result = find_text_part(full["payload"])
-
-        if not result:
-            snippet = full.get("snippet", "").strip()
-            if snippet:
-                body_snippet = snippet[:body_chars]
-            else:
-                unreadable += 1
-                continue
+        email = _message_to_email(service, msg, body_chars)
+        if email is None:
+            unreadable += 1
         else:
-            data, transfer_enc, mime_type = result
-            try:
-                full_body = decode_part(data, transfer_enc)
-                if mime_type == "text/html":
-                    full_body = strip_html(full_body)
-                body_snippet = full_body[:body_chars].strip()
-            except Exception as e:
-                body_snippet = full.get("snippet", f"[Decode error: {e}]")[:body_chars]
-
-        emails.append({
-            "id": msg["id"],
-            "from": headers.get("From", ""),
-            "subject": headers.get("Subject", ""),
-            "date": headers.get("Date", ""),
-            "body_snippet": body_snippet,
-            "labels": full.get("labelIds", []),
-        })
+            emails.append(email)
 
     return emails, unreadable, total, next_page_token
 

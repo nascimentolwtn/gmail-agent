@@ -66,8 +66,8 @@ Ordered by impact and what unblocks what (not conversation order).
     Do instead: `renderLabelOptions` / `filterLabels` rebuild `<select>` and drop prior selections. Keep a `modalSelectedTags` `Set`; on toggle add/remove; on re-render restore `selected` for names in the set; `confirmTagPick` reads the set (not only visible `selectedOptions`).
   Do instead (parent): multi-tag workflow: pick one label, filter, pick another without losing the first.
 
-- [ ] **[2026-05-20] Deduplicate `fetch_emails.py` (in-file only)**
-  Do instead: no new module — extract shared loop body from duplicated blocks `fetch_emails.py` L17–53 and L119–153 into one helper (e.g. `_message_to_email_dict(service, msg_id, body_chars)` → dict or None + unreadable). `get_unread_emails` and `get_unread_emails_paginated` keep list/pagination logic; only message fetch + decode + dict build is shared.
+- [x] **[2026-05-20] Deduplicate `fetch_emails.py` (in-file only)**
+  Fixed: extracted `_message_to_email(service, msg, body_chars)` helper (lines 6–39). Both `get_unread_emails` and `get_unread_emails_paginated` now call it — each keeps its own list/pagination logic. ~40 lines of duplication removed.
 
 - [ ] **[2026-05-20] `auto_tag_email`: LLM similarity over regex for label choice**
   Do instead: in `auto_tagger.auto_tag_email`, rank/pick labels by similarity to LLM prompt examples first; regex secondary/fallback. Same sender may need tag-then-act when context matters.
