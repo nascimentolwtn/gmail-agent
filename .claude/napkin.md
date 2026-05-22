@@ -86,7 +86,7 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-21] Loading bar not showing "Loading emails…" during user-initiated "Load next batch"**
   Fixed: `fetchNextBatch()` and `startBackgroundFetch()` now call `updateLoadingBar(null, null, false, null, null, true)` immediately before the fetch, so "⏳ Loading emails…" shows right away. Added `_lastLoaded`/`_lastTotal` module-level vars so passing `null` preserves last known values. After fetch completes, `updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, false)` switches back to idle state.
 
-- [x] **[2026-05-21] Suggestion column not updated after picking tags in modal**
+- [ ] **[2026-05-21] Suggestion column not updated after picking tags in modal**
   Fixed: (1) `confirmTagPick()` now updates both `state[modalRowIdx].action` and `DECISIONS[modalRowIdx].action` so user-picked tags persist. (2) `acceptRow()` now reads `cur.action || DECISIONS[idx].action` to preserve any user-set action instead of blindly overwriting with the LLM suggestion.
 
 - [x] **[2026-05-21] Commit saves `from`, `subject`, `snippet` from client**
