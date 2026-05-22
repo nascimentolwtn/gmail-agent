@@ -110,5 +110,25 @@ Ordered by impact and what unblocks what (not conversation order).
 - [ ] **[2026-05-21] "Hide Already-Processed/Committed" button**
   Do instead: add a button "Hide Already-Processed/Committed" in the toolbar that toggles visibility of rows already in `examples.json` or committed. Hidden rows keep their original index numbers (no renumbering). Use a CSS class (e.g. `.row-hidden { display: none }`) on `<tr>` elements. Button text toggles between "Hide Already-Processed" and "Show All". State persists across background fetches (new batches re-evaluate visibility). Does not remove rows from `EMAILS`/`DECISIONS` arrays — purely visual filtering.
 
+- [ ] **[2026-05-22] Android app: local-LLM Gmail tagger**
+  Build an Android app replicating `tagger_flask.py` features (email fetch, auto-tag review, commit) but using a local LLM (TinyLlama) for reasoning instead of a remote API. Key sub-tasks:
+  - **Gmail auth on Android**: OAuth2 via Google Sign-In SDK (replaces `auth_test.py` browser flow). Scopes: `gmail.readonly` + `gmail.modify`.
+  - **Email fetch**: port `fetch_emails.py` pagination logic to Kotlin/Java using Gmail API client library for Android.
+  - **Local LLM inference**: bundle TinyLlama (GGUF ~600MB) via `llama.cpp` Android bindings or MediaPipe LLM runtime. Replace `auto_tag_email()` / `pick_labels_from_prompt()` calls with on-device inference. Prompt format unchanged — same few-shot examples from `examples.json`.
+  - **UI**: single-activity + Jetpack Compose. Email list with swipe-to-accept/delete, tag picker modal (mirror Flask dashboard UX), commit button. Offline-capable: queue commits if no network.
+  - **Examples sync**: import/export `examples.json` so training data can be seeded from desktop `tagger_flask` session.
+  - **Stretch**: on-device summarization (post-commit body summaries item) using same TinyLlama instance.
+  Stack: Kotlin + Jetpack Compose + Google Sign-In + Gmail API client + llama.cpp NDK or MediaPipe.
+
+- [ ] **[2026-05-22] Per-credential `examples.json` (keyed by `project_id`)**
+  Do instead: when multiple `credentials.json` files exist (different Google Cloud projects / Gmail accounts), each project gets its own examples file so training data doesn't leak across accounts. Flow:
+  1. On startup, read `credentials.json` (or the active cred file) and extract `project_id` (e.g. `"luizwagnerlwtn"`).
+  2. Derive examples filename: `examples_{project_id}.json` (e.g. `examples_luizwagnerlwtn.json`).
+  3. All `load_examples()` / `save_examples()` calls across `auto_tagger.py`, `review_emails.py`, `tagger_flask.py`, `tagger_cli.py`, and `suggest.py` use the derived filename instead of hardcoded `"examples.json"`.
+  4. `pending_suggestions.json` in `tagger_flask.py` should also be namespaced: `pending_suggestions_{project_id}.json`.
+  5. Add a migration helper: if `examples.json` exists but no `examples_{project_id}.json` does, copy/rename it on first run.
+  6. Update `.gitignore` to `examples_*.json` and `pending_suggestions_*.json`.
+  Depends on: nothing. Unblocks safe multi-account usage.
+
 - [ ] **[2026-05-21] Post-commit LLM email body summaries**
   Do instead: after committing, generate LLM body summaries for all non-deleted emails. In `tagger_flask.py`, return summaries in the commit JSON response and show them in a new modal. In `tagger_cli.py`, print summaries after commit stats, before exit. Add `summarize_email_bodies()` helper in `auto_tagger.py` that batches all emails into one LLM call (same `LLAMA_URL` pattern as `pick_labels_from_prompt`). Gracefully skip if LLM unavailable.
