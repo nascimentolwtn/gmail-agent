@@ -104,8 +104,8 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-21] Fix column widths — more room for Snippet, less for Subject**
   Fixed: adjusted `<colgroup>` widths: Subject 20rem → 13rem, Snippet 9rem → 16rem. Snippet column now has much more room for body text while Subject is narrower (subject lines are typically short).
 
-- [ ] **[2026-05-21] "Accept All Pending" button**
-  Do instead: add a button "Accept All Pending" in the toolbar (next to "Commit All") that marks all pending rows as accepted with their current LLM suggestion. For rows where the suggestion is `delete`, mark as `delete` status instead. Rows with no suggestion are skipped. After clicking, all rows go to pending-commit state ready for commit.
+- [x] **[2026-05-21] "Accept All Pending" button**
+  Fixed: added `✓ Accept All Pending` button (green `#34a853`) in toolbar between "Commit All" and "Refresh". `acceptAllPending()` iterates all rows with `status==='pending'`, sets `delete` for delete suggestions and `accepted` for everything else, skips rows with no suggestion. Calls `updateRowUI()` per row so rows go to pending-commit (orange) state. Toast confirms count or "no pending rows".
 
 - [ ] **[2026-05-21] "Hide Already-Processed/Committed" button**
   Do instead: add a button "Hide Already-Processed/Committed" in the toolbar that toggles visibility of rows already in `examples.json` or committed. Hidden rows keep their original index numbers (no renumbering). Use a CSS class (e.g. `.row-hidden { display: none }`) on `<tr>` elements. Button text toggles between "Hide Already-Processed" and "Show All". State persists across background fetches (new batches re-evaluate visibility). Does not remove rows from `EMAILS`/`DECISIONS` arrays — purely visual filtering.

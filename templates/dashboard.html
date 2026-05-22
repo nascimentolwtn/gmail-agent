@@ -29,6 +29,9 @@
   <button class="btn-commit" id="btnCommit" onclick="commitAll()" disabled>
     ✓ Commit All
   </button>
+  <button class="btn-accept-all" id="btnAcceptAll" onclick="acceptAllPending()">
+    ✓ Accept All Pending
+  </button>
   <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
   <span class="stats" id="stats"></span>
 </div>
@@ -316,6 +319,30 @@ function confirmTagPick() {
     updateRowUI(modalRowIdx);
   }
   closeTagModal();
+}
+
+// ── Accept All Pending ──────────────────────────────────────────────────
+function acceptAllPending() {
+  let count = 0;
+  state.forEach((s, idx) => {
+    // Only act on rows that are still pending (not already accepted/delete/tagged/skipped/committed/already-processed)
+    if (s.status !== 'pending') return;
+    const action = s.action || DECISIONS[idx].action;
+    if (!action) return;  // skip rows with no suggestion
+    if (action === 'delete') {
+      state[idx] = { status: 'delete', action: 'delete' };
+    } else {
+      // tag or any other action → accepted
+      state[idx] = { status: 'accepted', action: action };
+    }
+    updateRowUI(idx);
+    count++;
+  });
+  if (count > 0) {
+    showToast(`✓ Accepted ${count} pending row${count !== 1 ? 's' : ''}`, 'success');
+  } else {
+    showToast('No pending rows to accept.', 'error');
+  }
 }
 
 // ── Commit ───────────────────────────────────────────────────────────────

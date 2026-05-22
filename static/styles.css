@@ -9,6 +9,8 @@ h1 { margin-bottom: 4px; font-size: 1.5rem; }
 .btn-commit { background: #1a73e8; color: #fff; }
 .btn-commit:hover { background: #1557b0; }
 .btn-commit:disabled { background: #ccc; cursor: not-allowed; }
+.btn-accept-all { background: #34a853; color: #fff; }
+.btn-accept-all:hover { background: #2d9249; }
 .btn-refresh { background: #fff; color: #333; border: 1px solid #ddd; }
 .btn-refresh:hover { background: #f0f0f0; }
 .stats { font-size: 0.85rem; color: #666; }
