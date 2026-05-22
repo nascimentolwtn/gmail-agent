@@ -34,6 +34,16 @@
 </div>
 
 <table>
+  <colgroup>
+    <col style="width:2.5rem">
+    <col style="width:11rem">
+    <col style="width:20rem">
+    <col style="width:9rem">
+    <col style="width:10rem">
+    <col style="width:15rem">
+    <col style="width:7rem">
+    <col style="width:6rem">
+  </colgroup>
   <thead>
     <tr>
       <th>#</th>
@@ -131,10 +141,10 @@ function buildRow(idx) {
   tr.innerHTML = `
     <td>${idx + 1}</td>
     <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
-    <td class="subject" title="${escHtml(email.subject)}">${escHtml(email.subject)}</td>
-    <td class="snippet" title="${escHtml(email.body_snippet)}">${escHtml(email.body_snippet || '')}</td>
+    <td class="subject" title="${escHtml(email.subject)}"><div>${escHtml(email.subject)}</div></td>
+    <td class="snippet" title="${escHtml(email.body_snippet)}"><div>${escHtml(email.body_snippet || '')}</div></td>
     <td class="suggestion">${suggestionBadge}</td>
-    <td class="reasoning" title="${escHtml(decision.reasoning || '')}">${escHtml(reasoning)}</td>
+    <td class="reasoning" title="${escHtml(decision.reasoning || '')}"><div>${escHtml(reasoning)}</div></td>
     <td class="actions">${actionsHtml}</td>
     <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
 `;
@@ -400,7 +410,6 @@ async function pollForMore() {
       const statusResp = await fetch('/api/status');
       const status = await statusResp.json();
       updateLoadingBar(status.loaded, status.total, status.done, status.error, status.last_activity, status.fetching);
-      updateFetchControl(status);
     }
   } catch (err) {
     // transient network error — keep polling
@@ -550,7 +559,6 @@ async function init() {
     .then(r => r.json())
     .then(s => {
       updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity, s.fetching);
-      updateFetchControl(s);
     })
     .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null, null, false));
 
