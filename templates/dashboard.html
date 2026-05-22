@@ -56,7 +56,7 @@
       <th>From</th>
       <th>Subject</th>
       <th>Snippet</th>
-      <th>Suggestion</th>
+      <th>Suggestion/Selection</th>
       <th>Reasoning</th>
       <th>Actions</th>
       <th>Status</th>
@@ -208,7 +208,7 @@ function updateRowUI(idx) {
     : s.status === 'committed' ? 'committed'
     : isPending ? 'pending-commit' : '';
   // Update suggestion badge from state (reflects user's actual decision)
-  const suggestionTd = row.children[4]; // 5th column = Suggestion
+  const suggestionTd = row.querySelector('.suggestion');
   if (suggestionTd) {
     const action = s.action || DECISIONS[idx].action;
     suggestionTd.innerHTML = formatSuggestionBadge(action);
@@ -224,6 +224,7 @@ function updateRowUI(idx) {
 let modalRowIdx = null;
 let allLabelNames = [];   // cached for filtering
 let modalSelectedTags = new Set();  // sticky selection across filter re-renders
+let rebuilding = false;   // suppress handleSelectChange during programmatic re-renders
 const LABEL_TOP_N = {{ top_n | safe }};  // server tells us how many are "frequent"
 
 function openTagModal(idx) {
@@ -245,6 +246,7 @@ function openTagModal(idx) {
 }
 
 function renderLabelOptions(names) {
+  rebuilding = true;
   const sel = document.getElementById('tagSelect');
   sel.innerHTML = '';
 
@@ -270,6 +272,7 @@ function renderLabelOptions(names) {
 
   // Render A–Z section
   visibleAlpha.forEach(n => sel.appendChild(makeOption(n)));
+  rebuilding = false;
 }
 
 function makeOption(n) {
@@ -291,6 +294,7 @@ function toggleTag(name, checked) {
 
 /** onchange handler: diff old Set vs new DOM selection to find what toggled */
 function handleSelectChange(sel) {
+  if (rebuilding) return;   // ignore events fired during programmatic re-render
   const visible = new Set(sel.options.map(o => o.value));
   const currentSelected = new Set(Array.from(sel.selectedOptions).map(o => o.value));
   // Remove deselected items that are visible in this filter
@@ -314,14 +318,19 @@ function closeTagModal() {
 }
 
 function confirmTagPick() {
-  if (modalRowIdx !== null && modalSelectedTags.size > 0) {
-    const selected = Array.from(modalSelectedTags);
-    const action = selected.map(l => 'tag:' + l);
-    state[modalRowIdx] = { status: 'tagged', action: action };
-    DECISIONS[modalRowIdx].action = action;
-    updateRowUI(modalRowIdx);
-  }
+  const idx = modalRowIdx;
+  if (idx === null) { closeTagModal(); return; }
   closeTagModal();
+  // Read directly from the DOM selectedOptions — most reliable source of truth
+  const sel = document.getElementById('tagSelect');
+  const selected = Array.from(sel.selectedOptions).map(o => o.value);
+  if (selected.length > 0) {
+    const action = selected.map(l => 'tag:' + l);
+    state[idx] = { status: 'tagged', action: action };
+    DECISIONS[idx].action = action;
+    DECISIONS[idx].reasoning = 'user-picked';
+    updateRowUI(idx);
+  }
 }
 
 // ── Accept All Pending ──────────────────────────────────────────────────
@@ -587,9 +596,9 @@ async function loadCachedSuggestions() {
           // Update the row UI if it exists
           const row = document.getElementById('row-' + idx);
           if (row) {
-            const suggestionTd = row.children[4];
+            const suggestionTd = row.querySelector('.suggestion');
             if (suggestionTd) suggestionTd.innerHTML = formatSuggestionBadge(cached.action);
-            const reasoningTd = row.children[5];
+            const reasoningTd = row.querySelector('.reasoning');
             if (reasoningTd) reasoningTd.textContent = (cached.reasoning || '').substring(0, 120);
           }
         }
