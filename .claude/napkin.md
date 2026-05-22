@@ -62,11 +62,11 @@ Ordered by impact and what unblocks what (not conversation order).
     Do instead: extract shared helper from `get_recent_labels` + sort (e.g. `ordered_labels_for_picker(examples, session, label_map, top_n=9)`): top-N by usage in `examples.json` + session first, remaining labels alphabetical. Use in `pick_labels()` (`tagger_cli`) and when building `LABELS` / `openTagModal` (`tagger_flask`).
   Do instead (parent): reuse `review_emails` ordering/filter logic in both interfaces so tag picking matches CLI behavior.
 
-- [x] **[2026-05-20] Tag picker modal polish (`tagger_flask`)**
+- [ ] **[2026-05-20] Tag picker modal polish (`tagger_flask`)**
   Fixed:
   - **Separator**: server passes `top_n` (count of frequent labels). `renderLabelOptions` inserts a disabled `────` option between the last "frequent" label and the first A–Z label. When filter narrows the list, separator still appears at the correct boundary.
-  - **Sticky multi-select**: `modalSelectedTags` Set persists across filter re-renders. `renderLabelOptions` restores `opt.selected = true` for Set members. `syncModalSelection()` on `<select onchange>` updates the Set from DOM. `confirmTagPick` reads from the Set, not DOM `selectedOptions` — so filtering + picking works seamlessly.
-
+  - **Sticky multi-select**: `modalSelectedTags` Set persists across filter re-renders. `renderLabelOptions` restores `opt.selected = true` for Set members. `handleSelectChange` on `<select onchange>` diffs visible vs selected to preserve hidden selections. `confirmTagPick` reads from the Set, not DOM `selectedOptions`.
+  - **FIXME (still broken)**: after filtering labels and selecting labels that are visible in the filtered list, clearing the textbox causes selected labels to become unselected. Root cause: `renderLabelOptions` rebuilds the `<select>` DOM and sets `opt.selected = true` via `makeOption`, which fires the `onchange` event. `handleSelectChange` then reads `sel.selectedOptions` — but during the rebuild the DOM selection state is inconsistent, causing items to be removed from `modalSelectedTags`. Fix: use a `rebuilding` flag to suppress `handleSelectChange` during programmatic re-renders, or detach/reattach the `onchange` handler around `renderLabelOptions` calls.
 - [x] **[2026-05-20] Deduplicate `fetch_emails.py` (in-file only)**
   Fixed: extracted `_message_to_email(service, msg, body_chars)` helper (lines 6–39). Both `get_unread_emails` and `get_unread_emails_paginated` now call it — each keeps its own list/pagination logic. ~40 lines of duplication removed.
 
@@ -99,4 +99,12 @@ Ordered by impact and what unblocks what (not conversation order).
 
 - [ ] **[2026-05-21] Post-commit LLM email body summaries**
   Do instead: after committing, generate LLM body summaries for all non-deleted emails. In `tagger_flask.py`, return summaries in the commit JSON response and show them in a new modal. In `tagger_cli.py`, print summaries after commit stats, before exit. Add `summarize_email_bodies()` helper in `auto_tagger.py` that batches all emails into one LLM call (same `LLAMA_URL` pattern as `pick_labels_from_prompt`). Gracefully skip if LLM unavailable.
+
+- [ ] **[2026-05-21] "Accept All Pending" button**
+  Do instead: add a button "Accept All Pending" in the toolbar (next to "Commit All") that marks all pending rows as accepted with their current LLM suggestion. For rows where the suggestion is `delete`, mark as `delete` status instead. Rows with no suggestion are skipped. After clicking, all rows go to pending-commit state ready for commit.
+
+- [ ] **[2026-05-21] Suggestion column not updated when overriding delete with tag**
+  Do instead: when an email is suggested as delete and the user clicks "Pick Tags" to tag instead, `confirmTagPick()` updates `state[idx].action` and `DECISIONS[idx].action` and calls `updateRowUI()`. However, `updateRowUI()` reads `s.action || DECISIONS[idx].action` — if `s.action` was previously set to `"delete"` by a prior `deleteRow()` call, the `||` fallback is short-circuited and the old delete action persists. Fix: in `confirmTagPick()`, explicitly set `DECISIONS[modalRowIdx].action` to the new tag array (already done) AND ensure `updateRowUI()` always uses `s.action` when it is an array (tag list), falling back to `DECISIONS` only when `s.action` is null/empty.
+
+
 
