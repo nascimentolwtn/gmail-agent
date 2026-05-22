@@ -108,7 +108,7 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-21] "Accept All Pending" button**
   Fixed: added `✓ Accept All Pending` button (green `#34a853`) in toolbar between "Commit All" and "Refresh". `acceptAllPending()` iterates all rows with `status==='pending'`, sets `delete` for delete suggestions and `accepted` for everything else, skips rows with no suggestion. Calls `updateRowUI()` per row so rows go to pending-commit (orange) state. Toast confirms count or "no pending rows".
 
-- [ ] **[2026-05-21] "Hide Already-Processed/Committed" toggle button**
+- [X] **[2026-05-21] "Hide Already-Processed/Committed" toggle button**
   Do instead: add a toggle button "Hide Already-Processed" in the toolbar. First click hides all rows that are `already-processed` or `committed` (adds CSS class `.row-hidden { display: none }` to `<tr>` elements). Second click shows them again (removes the class). Rows stay in the DOM and in `EMAILS`/`DECISIONS` arrays — purely visual toggle, no data removal. Button text toggles between "Hide Already-Processed" and "Show All". Hidden rows keep their original index numbers (no renumbering). State persists across background fetches — new batches re-evaluate visibility based on current toggle state.
 
 - [ ] **[2026-05-22] Android app: local-LLM Gmail tagger**
@@ -130,6 +130,12 @@ Ordered by impact and what unblocks what (not conversation order).
   5. Add a migration helper: if `examples.json` exists but no `examples_{project_id}.json` does, copy/rename it on first run.
   6. Update `.gitignore` to `examples_*.json` and `pending_suggestions_*.json`.
   Depends on: nothing. Unblocks safe multi-account usage.
+
+- [ ] **[2026-05-22] "Mark as Read" and "Delete Later" checkboxes**
+  Add two per-row checkboxes in the dashboard:
+  1. **Mark as Read** — when committed, email gets all tags applied AND is marked as read on Gmail (remove UNREAD label via API).
+  2. **Delete Later** — committed tags are sent to Gmail, but email stays unread (user needs to act on it, then delete later). Mutually exclusive with "delete" action: checking "Del Later" removes delete action; clicking 🗑 unchecks "Del Later".
+  Both flags (`mark_read`, `delete_later`) are included in the commit payload and saved to `examples.json` so the LLM learns from them. Plan: `/home/lw_na/.claude/plans/hashed-jingling-toast.md`.
 
 - [ ] **[2026-05-21] Post-commit LLM email body summaries**
   Do instead: after committing, generate LLM body summaries for all non-deleted emails. In `tagger_flask.py`, return summaries in the commit JSON response and show them in a new modal. In `tagger_cli.py`, print summaries after commit stats, before exit. Add `summarize_email_bodies()` helper in `auto_tagger.py` that batches all emails into one LLM call (same `LLAMA_URL` pattern as `pick_labels_from_prompt`). Gracefully skip if LLM unavailable.
