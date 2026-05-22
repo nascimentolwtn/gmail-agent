@@ -11,8 +11,8 @@
 
 Ordered by impact and what unblocks what (not conversation order).
 
-- [ ] **[2026-05-20] `tagger_flask`: loading progress only while fetching + beside “Load next batch”**
-  Do instead: hide or stop showing `⏳ Loading emails… N / ~T loaded so far — review while you wait!` when idle (first batch done, waiting on user). Show it only while `/api/fetch_next` is in flight (`fetchSpinner` / `fetching` flag). Move progress text into `#fetchControl` next to `#btnFetchNext` (not `#loadingBar`); keep `#loadingBar` for errors / “all loaded” or remove redundant spinner when opt-in fetch is the only background path (`templates/dashboard.html` `updateLoadingBar`, `fetchNextBatch`, `updateFetchControl`).
+- [x] **[2026-05-20] `tagger_flask`: loading progress only while fetching + beside "Load next batch"**
+  Fixed: moved status text into `#fetchControl` next to `#btnFetchNext`. `updateLoadingBar()` manages all 3 states (done/fetching/idle) and controls fetch control visibility. Loading bar at top shows minimal status; detail text lives in fetch control row.
 
 - [x] **[2026-05-20] URGENT FIXME: duplicate rows in `tagger_flask` email list**
   Fixed: (1) set `last_served_idx=1` after storing batch 0 so `/api/more` skips already-rendered rows; (2) pass `next_token` to `_background_fetch(start_page_token=…)` so it doesn't re-fetch page 1; (3) added JS-side `addBatch` dedup by `email.id` as safety net.
@@ -39,16 +39,16 @@ Ordered by impact and what unblocks what (not conversation order).
   Fixed: replaced `tr.already-processed` CSS (`#f8f9fa` + `opacity:0.6`) with clean `#e8f5e9` (same green as committed, but rows are visually distinct by context).
 
 - [x] **[2026-05-20] `tagger_flask` FIXME: loading bar stuck after background fetch**
-  Do instead: when `_fetch_state["done"]` is true, client must call `updateLoadingBar(..., done=true)` (spinner off, “done” styling). Fix `init()` forcing `done=false` (L545), last `/api/more` poll edge cases, and/or one final `/api/status` after `clearInterval`.
+  Do instead: when `_fetch_state["done"]` is true, client must call `updateLoadingBar(..., done=true)` (spinner off, "done" styling). Fix `init()` forcing `done=false` (L545), last `/api/more` poll edge cases, and/or one final `/api/status` after `clearInterval`.
 
 - [x] **[2026-05-20] `tagger_flask`: last-action timestamp (fetch + commit)**
-  Fixed: added `last_activity` to `_fetch_state` with `{action, ts}` recorded on first_batch, fetch_batch, fetch_complete, and commit. Exposed via `/api/status` and commit response. Client shows “⏳ First batch loaded at HH:MM:SS” etc. in `#lastActivity` div below loading bar.
+  Fixed: added `last_activity` to `_fetch_state` with `{action, ts}` recorded on first_batch, fetch_batch, fetch_complete, and commit. Exposed via `/api/status` and commit response. Client shows "⏳ First batch loaded at HH:MM:SS" etc. in `#lastActivity` div below loading bar.
 
 - [x] **[2026-05-20] `tagger_flask`: opt-in background fetch + persist pending LLM suggestions**
   Fixed:
   - Removed auto-start of `_background_fetch` in `dashboard()`. Instead stores `next_page_token` in `_fetch_state` and sets `done=true` immediately if no more pages.
-  - Added `/api/fetch_next` (POST) endpoint: fetches one `BATCH_SIZE` batch, tags via LLM, appends to `batches`, returns new emails+decisions. Dashboard shows “Load next batch” button with remaining count; hides when all fetched.
-  - Added `pending_suggestions.json` + `_load_pending_suggestions()` / `_save_pending_suggestions()` helpers. Each fetched batch’s LLM output (action+reasoning) is persisted per `email_id`.
+  - Added `/api/fetch_next` (POST) endpoint: fetches one `BATCH_SIZE` batch, tags via LLM, appends to `batches`, returns new emails+decisions. Dashboard shows "Load next batch" button with remaining count; hides when all fetched.
+  - Added `pending_suggestions.json` + `_load_pending_suggestions()` / `_save_pending_suggestions()` helpers. Each fetched batch's LLM output (action+reasoning) is persisted per `email_id`.
   - Added `/api/suggestions` endpoint. `init()` calls it on load and merges cached suggestions into `DECISIONS` for rows that still have no action, so LLM work survives refresh without re-calling model.
   - `pending_suggestions.json` added to `.gitignore`.
 
@@ -81,3 +81,18 @@ Ordered by impact and what unblocks what (not conversation order).
 
 - [x] **[2026-05-21] Loading bar not showing "Loading emails…" during user-initiated "Load next batch"**
   Fixed: `fetchNextBatch()` and `startBackgroundFetch()` now call `updateLoadingBar(null, null, false, null, null, true)` immediately before the fetch, so "⏳ Loading emails…" shows right away. Added `_lastLoaded`/`_lastTotal` module-level vars so passing `null` preserves last known values. After fetch completes, `updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, false)` switches back to idle state.
+
+- [x] **[2026-05-21] Suggestion column not updated after picking tags in modal**
+  Fixed: (1) `confirmTagPick()` now updates both `state[modalRowIdx].action` and `DECISIONS[modalRowIdx].action` so user-picked tags persist. (2) `acceptRow()` now reads `cur.action || DECISIONS[idx].action` to preserve any user-set action instead of blindly overwriting with the LLM suggestion.
+
+- [x] **[2026-05-21] Commit saves `from`, `subject`, `snippet` from client**
+  Fixed: JS `commitAll()` now sends `from`, `subject`, `snippet` with each decision from the client-side `EMAILS` array. Server save logic prefers client-provided fields over fragile `_fetch_state` batch lookup. Eliminates empty-field bug caused by multi-worker Flask or page refreshes clearing server state.
+
+- [x] **[2026-05-21] Row background color for pending-commit (accepted/tagged/delete)**
+  Fixed: added `tr.pending-commit { background: #fff3e0; }` (orange/amber) and `.status-pending-commit { color: #e65100; }` in CSS. `updateRowUI()` now applies `pending-commit` class for accepted/delete/tagged rows and shows "⏳ accepted" / "⏳ delete" / "⏳ tagged" in the status cell. Distinct from `committed` (green), `already-processed` (blue), and `skipped` (dimmed).
+
+- [x] **[2026-05-21] Auto background fetch one batch on page load**
+  Fixed: `init()` calls `startBackgroundFetch()` which fetches one batch via `/api/fetch_next` with button disabled + spinner. After completion, button re-enabled, loading bar and fetch control updated. Removed old `updateFetchControl()` function — logic folded into `updateLoadingBar()`.
+
+- [x] **[2026-05-21] Loading bar and timestamp merged into one row**
+  Fixed: `#lastActivity` moved inside `#loadingBar` div. Layout: `[spinner] [status text..............] [timestamp right-aligned]`. `loadingText` gets `flex:1` to expand and push timestamp to the right edge.

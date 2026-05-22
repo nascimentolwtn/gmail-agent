@@ -31,7 +31,8 @@ td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 0.85rem;
 tr:hover { background: #f8f9fa; }
 tr.skipped { opacity: 0.45; }
 tr.committed { background: #cfe1bd; }
-tr.already-processed { background: #cfe1bd; }
+tr.pending-commit { background: #fff3e0; }
+tr.already-processed { background: #e3f2fd; }
 .from { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .subject > div, .snippet > div, .reasoning > div {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -64,6 +65,7 @@ tr.already-processed { background: #cfe1bd; }
 .status-delete    { color: #ea4335; }
 .status-skipped   { color: #aaa; }
 .status-committed { color: #1a73e8; }
+.status-pending-commit { color: #e65100; }
 .status-already-processed { color: #1a73e8; font-style: italic; }
 /* Tag picker modal */
 .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;

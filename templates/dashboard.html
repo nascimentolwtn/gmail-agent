@@ -178,7 +178,8 @@ function addBatch(emails, decisions) {
 
 // ── Row actions ──────────────────────────────────────────────────────────
 function acceptRow(idx) {
-  state[idx] = { status: 'accepted', action: DECISIONS[idx].action };
+  const cur = state[idx];
+  state[idx] = { status: 'accepted', action: cur.action || DECISIONS[idx].action };
   updateRowUI(idx);
 }
 
@@ -195,9 +196,11 @@ function skipRow(idx) {
 function updateRowUI(idx) {
   const row = document.getElementById('row-' + idx);
   const s = state[idx];
+  const isPending = s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged';
   row.className = s.status === 'skipped' ? 'skipped'
     : s.status === 'already-processed' ? 'already-processed'
-    : s.status === 'committed' ? 'committed' : '';
+    : s.status === 'committed' ? 'committed'
+    : isPending ? 'pending-commit' : '';
   // Update suggestion badge from state (reflects user's actual decision)
   const suggestionTd = row.children[4]; // 5th column = Suggestion
   if (suggestionTd) {
@@ -205,8 +208,9 @@ function updateRowUI(idx) {
     suggestionTd.innerHTML = formatSuggestionBadge(action);
   }
   const statusTd = document.getElementById('status-' + idx);
-  statusTd.textContent = s.status;
-  statusTd.className = 'status status-' + s.status;
+  const statusLabel = isPending ? 'pending-commit' : s.status;
+  statusTd.textContent = isPending ? '⏳ ' + s.status : s.status;
+  statusTd.className = 'status status-' + statusLabel;
   updateStats();
 }
 
@@ -306,10 +310,9 @@ function closeTagModal() {
 function confirmTagPick() {
   if (modalRowIdx !== null && modalSelectedTags.size > 0) {
     const selected = Array.from(modalSelectedTags);
-    state[modalRowIdx] = {
-      status: 'tagged',
-      action: selected.map(l => 'tag:' + l),
-    };
+    const action = selected.map(l => 'tag:' + l);
+    state[modalRowIdx] = { status: 'tagged', action: action };
+    DECISIONS[modalRowIdx].action = action;
     updateRowUI(modalRowIdx);
   }
   closeTagModal();
