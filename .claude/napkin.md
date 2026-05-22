@@ -78,3 +78,6 @@ Ordered by impact and what unblocks what (not conversation order).
 
 - [x] **[2026-05-20] Two-line rows in `tagger_flask` review table**
   Fixed: used `<colgroup>` with explicit `<col>` widths for stable column layout (`table-layout: fixed`). Applied `-webkit-line-clamp: 2` on inner `<div>` wrappers inside `.subject`, `.snippet`, `.reasoning` cells — never on `<td>` directly (breaks table-cell display). Column widths: # 2.5rem, From 11rem, Subject 20rem, Snippet 9rem, Suggestion 10rem, Reasoning 15rem, Actions 7rem, Status 6rem. Increased JS reasoning truncation from 120 to 200 chars.
+
+- [x] **[2026-05-21] Loading bar not showing "Loading emails…" during user-initiated "Load next batch"**
+  Fixed: `fetchNextBatch()` and `startBackgroundFetch()` now call `updateLoadingBar(null, null, false, null, null, true)` immediately before the fetch, so "⏳ Loading emails…" shows right away. Added `_lastLoaded`/`_lastTotal` module-level vars so passing `null` preserves last known values. After fetch completes, `updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, false)` switches back to idle state.

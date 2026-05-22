@@ -433,6 +433,7 @@ async function startBackgroundFetch() {
   const spinner = document.getElementById('fetchSpinner');
   if (btn) btn.disabled = true;
   if (spinner) spinner.style.display = 'inline-block';
+  updateLoadingBar(null, null, false, null, null, true);
 
   try {
     const resp = await fetch('/api/fetch_next', { method: 'POST' });
@@ -442,7 +443,7 @@ async function startBackgroundFetch() {
       addBatch(data.emails, data.decisions);
     }
 
-    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, data.fetching);
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, false);
   } catch (err) {
     showToast('Background fetch failed: ' + err, 'error');
   } finally {
@@ -462,7 +463,15 @@ function updateLastActivity(activity) {
   el.textContent = label + ' at ' + timeStr;
 }
 
+let _lastLoaded = 0;
+let _lastTotal = 0;
+
 function updateLoadingBar(loaded, total, done, error, activity, fetching) {
+  if (loaded != null) _lastLoaded = loaded;
+  if (total != null) _lastTotal = total;
+  loaded = _lastLoaded;
+  total = _lastTotal;
+
   const bar = document.getElementById('loadingBar');
   const text = document.getElementById('loadingText');
   const ctrl = document.getElementById('fetchControl');
@@ -532,13 +541,14 @@ async function fetchNextBatch() {
   const spinner = document.getElementById('fetchSpinner');
   btn.disabled = true;
   spinner.style.display = 'inline-block';
+  updateLoadingBar(null, null, false, null, null, true);
   try {
     const resp = await fetch('/api/fetch_next', { method: 'POST' });
     const data = await resp.json();
     if (data.emails && data.emails.length > 0) {
       addBatch(data.emails, data.decisions);
     }
-    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, data.fetching);
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, false);
   } catch (err) {
     showToast('Fetch failed: ' + err, 'error');
   } finally {
