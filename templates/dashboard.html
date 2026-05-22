@@ -32,6 +32,9 @@
   <button class="btn-accept-all" id="btnAcceptAll" onclick="acceptAllPending()">
     ✓ Accept All Pending
   </button>
+  <button class="btn-toggle-hidden" id="btnToggleHidden" onclick="toggleHiddenRows()">
+    Hide Already-Processed
+  </button>
   <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
   <span class="stats" id="stats"></span>
 </div>
@@ -342,6 +345,36 @@ function acceptAllPending() {
     showToast(`✓ Accepted ${count} pending row${count !== 1 ? 's' : ''}`, 'success');
   } else {
     showToast('No pending rows to accept.', 'error');
+  }
+}
+
+// ── Toggle hide/show already-processed & committed rows ──────────────────
+let _hiddenRowsVisible = true;   // true = showing all; false = hidden rows are hidden
+
+function toggleHiddenRows() {
+  _hiddenRowsVisible = !_hiddenRowsVisible;
+  const btn = document.getElementById('btnToggleHidden');
+  const rows = document.querySelectorAll('tr.already-processed, tr.committed');
+  rows.forEach(row => {
+    if (_hiddenRowsVisible) {
+      row.classList.remove('row-hidden');
+    } else {
+      row.classList.add('row-hidden');
+    }
+  });
+  if (_hiddenRowsVisible) {
+    btn.textContent = 'Hide Already-Processed';
+    btn.classList.remove('active');
+  } else {
+    btn.textContent = 'Show All';
+    btn.classList.add('active');
+  }
+}
+
+// Apply current hide/show state to a specific row (called after addBatch / status changes)
+function applyHiddenState(row) {
+  if (!_hiddenRowsVisible && (row.classList.contains('already-processed') || row.classList.contains('committed'))) {
+    row.classList.add('row-hidden');
   }
 }
 

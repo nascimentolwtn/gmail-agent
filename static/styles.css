@@ -11,6 +11,9 @@ h1 { margin-bottom: 4px; font-size: 1.5rem; }
 .btn-commit:disabled { background: #ccc; cursor: not-allowed; }
 .btn-accept-all { background: #34a853; color: #fff; }
 .btn-accept-all:hover { background: #2d9249; }
+.btn-toggle-hidden { background: #fff; color: #555; border: 1px solid #ccc; }
+.btn-toggle-hidden:hover { background: #f0f0f0; }
+.btn-toggle-hidden.active { background: #e0e0e0; color: #333; border-color: #999; }
 .btn-refresh { background: #fff; color: #333; border: 1px solid #ddd; }
 .btn-refresh:hover { background: #f0f0f0; }
 .stats { font-size: 0.85rem; color: #666; }
@@ -35,6 +38,7 @@ tr.skipped { opacity: 0.45; }
 tr.committed { background: #cfe1bd; }
 tr.pending-commit { background: #fff3e0; }
 tr.already-processed { background: #e3f2fd; }
+tr.row-hidden { display: none; }
 .from { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .subject > div, .snippet > div, .reasoning > div {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
