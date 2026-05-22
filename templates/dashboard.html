@@ -321,10 +321,14 @@ async function commitAll() {
   state.forEach((s, idx) => {
     if (s.status === 'accepted' || s.status === 'delete' || s.status === 'tagged') {
       if (s.action) {
+        const email = EMAILS[idx];
         decisions.push({
-          email_id: EMAILS[idx].id,
+          email_id: email.id,
           action: s.action,
           reasoning: (DECISIONS[idx] && DECISIONS[idx].reasoning) || '',
+          from: email.from || '',
+          subject: email.subject || '',
+          snippet: email.body_snippet || '',
         });
       }
     }

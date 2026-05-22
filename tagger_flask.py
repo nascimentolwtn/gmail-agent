@@ -511,18 +511,19 @@ def api_commit():
                 if not email_id or not action:
                     continue
                 # Skip if already in examples (prefer id, fall back to from+subject)
-                em = email_lookup.get(email_id, {})
                 if email_id and email_id in seen_ids:
                     continue
-                from_val = em.get("from", "")
-                subject_val = em.get("subject", "")
+                # Prefer client-provided fields; fall back to batch lookup
+                em = email_lookup.get(email_id, {})
+                from_val = entry.get("from") or em.get("from", "")
+                subject_val = entry.get("subject") or em.get("subject", "")
                 if (from_val, subject_val) in seen_keys:
                     continue
                 new_entry = {
                     "id": email_id,
                     "from": from_val,
                     "subject": subject_val,
-                    "snippet": em.get("body_snippet", ""),
+                    "snippet": entry.get("snippet") or em.get("body_snippet", ""),
                     "action": action,
                     "reasoning": entry.get("reasoning", ""),
                 }
