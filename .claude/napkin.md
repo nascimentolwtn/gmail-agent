@@ -96,3 +96,7 @@ Ordered by impact and what unblocks what (not conversation order).
 
 - [x] **[2026-05-21] Loading bar and timestamp merged into one row**
   Fixed: `#lastActivity` moved inside `#loadingBar` div. Layout: `[spinner] [status text..............] [timestamp right-aligned]`. `loadingText` gets `flex:1` to expand and push timestamp to the right edge.
+
+- [ ] **[2026-05-21] Post-commit LLM email body summaries**
+  Do instead: after committing, generate LLM body summaries for all non-deleted emails. In `tagger_flask.py`, return summaries in the commit JSON response and show them in a new modal. In `tagger_cli.py`, print summaries after commit stats, before exit. Add `summarize_email_bodies()` helper in `auto_tagger.py` that batches all emails into one LLM call (same `LLAMA_URL` pattern as `pick_labels_from_prompt`). Gracefully skip if LLM unavailable.
+
