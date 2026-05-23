@@ -114,6 +114,23 @@ Ordered by impact and what unblocks what (not conversation order).
 - [X] **[2026-05-21] "Hide Already-Processed/Committed" toggle button**
   Do instead: add a toggle button "Hide Already-Processed" in the toolbar. First click hides all rows that are `already-processed` or `committed` (adds CSS class `.row-hidden { display: none }` to `<tr>` elements). Second click shows them again (removes the class). Rows stay in the DOM and in `EMAILS`/`DECISIONS` arrays — purely visual toggle, no data removal. Button text toggles between "Hide Already-Processed" and "Show All". Hidden rows keep their original index numbers (no renumbering). State persists across background fetches — new batches re-evaluate visibility based on current toggle state.
 
+- [x] **[2026-05-23] Summary modal always showing "unknown" for subject/from**
+  Root cause: `summarize_email_bodies()` never included email IDs in the LLM prompt (only `Email 1:`, `Email 2:` etc.), so the LLM couldn't return correct ID keys. `showSummaryModal()` then failed to find emails in `emailMap`, showing `'(unknown)'` for subject and empty string for `from`.
+  Fix: changed prompt to use positional indices (`"1"`, `"2"`, …) as keys and map them back to actual email IDs server-side after the LLM response. The `emailMap` lookup in `showSummaryModal` now works correctly, displaying real `from` and `subject` values.
+
+- [ ] **[2026-05-23] Skip LLM tagging for emails already trained in examples.json — replay saved action instead**
+  Currently `auto_tag_email()` is called for every email on every fetch (both `/` and `/api/fetch_next`), even if that email was already committed to `examples.json`. For already-trained emails, the LLM call is wasted and can even suggest a *different* action than what the user previously chose.
+
+  Do instead:
+  1. Before calling `auto_tag_email()`, look up the email in `examples.json` (match by `id` first, fall back to `from+subject` composite key).
+  2. If found, build an `EmailDecision` directly from the saved entry: `action = ex["action"]` (e.g. `"delete"` or `["tag:LABEL1", ...]`), `reasoning = ex.get("reasoning", "previously trained")`, and restore `mark_read` / `delete_later` booleans from the saved entry.
+  3. For the **client-side** `addBatch()` / `isAlreadyProcessed()` flow: already-processed rows currently get the *LLM suggestion* as their `DECISIONS[idx].action` and the saved action only in `state[idx].action` (via `processed ? null : …`). Fix this so that the saved action from examples.json is also placed in `DECISIONS[idx]` — that way the suggestion badge shows what was *actually* done before, not a new LLM guess. The `state[idx].action` for already-processed rows should also be set to the saved action (not `null`), so the row accurately reflects the prior decision.
+  4. For the **server-side** batch data sent to the client: when an email matches examples.json, include the saved action+reasoning in the batch response so the client can populate `DECISIONS` and `state` correctly. Both first batch (dashboard route) and background batches (fetch_next route) need this.
+  5. In `dashboard()` route (~L178-194): pass the `already_ids`/`already_keys` sets to the tagging loop, and for matched emails skip the LLM call.
+  6. In `api_fetch_next()` (~L348-361): same — check examples.json before calling `auto_tag_email()`.
+
+  Depends on: nothing. Unblocks skipping wasted LLM calls and showing correct prior actions in the suggestion column.
+
 - [ ] **[2026-05-22] Redesign tag picker modal: click-to-add / ✕-to-remove list instead of ctrl+click `<select multiple>`**
   Replace the current `<select multiple>` in the tag picker modal with a clickable list UI. Each visible label is a row with the label name on the left and an "✕" button on the left. Clicking the label name selects/adds the tag (highlights it, adds to chosen set). Clicking "✕" on a chosen tag removes it. Selected tags appear in a "Chosen" section at the top of the list (or inline with a distinct style). The filter input still filters the full label list. No ctrl+click needed — single click toggles. Update CSS and JS (`openTagModal`, `renderLabelOptions`, `confirmTagPick`, remove `handleSelectChange`/`modalSelectedTags` Set/dedup logic, remove `rebuilding` flag).
 

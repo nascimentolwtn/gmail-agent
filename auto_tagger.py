@@ -370,7 +370,8 @@ def summarize_email_bodies(
     if not emails or not LLAMA_URL or not re.match(r"^http://[\w.]+:\d+", LLAMA_URL):
         return {}
 
-    # Build compact email list for the prompt — keep under context limit
+    # Build compact email list for the prompt — keep under context limit.
+    # Use positional indices (1, 2, 3…) as keys; we map back to email IDs on return.
     lines = []
     for i, em in enumerate(emails, start=1):
         sender = (em.get("from", "") or "")[:80]
@@ -392,8 +393,8 @@ def summarize_email_bodies(
         "what the email is about, any action items, or important details.\n\n"
         "RULES:\n"
         "  • Return ONLY valid JSON — no explanation, no markdown code fences\n"
-        '  • Format: {"summaries": {"EMAIL_ID_1": "summary 1", "EMAIL_ID_2": "summary 2", ...}}\n'
-        '  • Keys must be the email\'s id field (as strings)\n'
+        '  • Format: {"summaries": {"1": "summary 1", "2": "summary 2", ...}}\n'
+        '  • Keys must be the email position numbers (as strings) shown at the start of each email block\n'
         '  • If the body is too short to summarize, return a brief description based on subject/sender\n'
     )
 
@@ -421,10 +422,17 @@ def summarize_email_bodies(
         if not raw_text or "{" not in raw_text:
             return {}
         out = json.loads(raw_text)
-        summaries = out.get("summaries", {})
-        if isinstance(summaries, dict):
-            return {str(k): str(v) for k, v in summaries.items()}
-        return {}
+        raw_summaries = out.get("summaries", {})
+        if not isinstance(raw_summaries, dict):
+            return {}
+        # Map positional keys ("1", "2", …) back to actual email IDs
+        email_ids = [str(em.get("id", "")) for em in emails]
+        result: dict[str, str] = {}
+        for key, val in raw_summaries.items():
+            idx = int(key) - 1  # "1" → index 0
+            if 0 <= idx < len(email_ids) and email_ids[idx]:
+                result[email_ids[idx]] = str(val)
+        return result
     except Exception:
         return {}
 
