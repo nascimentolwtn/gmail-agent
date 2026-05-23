@@ -29,7 +29,7 @@ from flask import Flask, request, jsonify, render_template
 
 from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails_paginated
-from auto_tagger import auto_tag_email, load_examples
+from auto_tagger import auto_tag_email, load_examples, summarize_email_bodies
 from review_emails import load_labels, save_examples, ordered_labels_for_picker
 
 app = Flask(__name__)
@@ -550,6 +550,29 @@ def api_commit():
         except Exception:
             pass  # don't fail the commit if saving examples fails
 
+    # Generate post-commit LLM body summaries for non-deleted emails
+    summaries: dict[str, str] = {}
+    if tagged > 0:
+        try:
+            summary_inputs = []
+            for entry in raw_decisions:
+                email_id = entry.get("email_id", "")
+                action = entry.get("action")
+                if not email_id or action == "delete":
+                    continue
+                em = email_lookup.get(email_id, {})
+                summary_inputs.append({
+                    "id": email_id,
+                    "from": entry.get("from") or em.get("from", ""),
+                    "subject": entry.get("subject") or em.get("subject", ""),
+                    "body_snippet": entry.get("snippet") or em.get("body_snippet", ""),
+                })
+            if summary_inputs:
+                examples_for_summary = load_examples("examples.json")
+                summaries = summarize_email_bodies(summary_inputs, examples_for_summary)
+        except Exception:
+            pass  # summaries are best-effort
+
     with _fetch_lock:
         _fetch_state["last_activity"] = {
             "action": "commit",
@@ -562,6 +585,7 @@ def api_commit():
         "errors": errors,
         "details": details,
         "last_activity": _fetch_state["last_activity"],
+        "summaries": summaries,
     })
 
 

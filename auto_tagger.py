@@ -354,6 +354,81 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9, labe
     return top_labels, reason
 
 
+def summarize_email_bodies(
+    emails: list[dict],
+    examples: list[dict] | None = None,
+) -> dict[str, str]:
+    """Generate a one-sentence body summary for each committed email via a single LLM call.
+
+    Args:
+        emails: list of dicts with keys {id, from, subject, body_snippet}
+        examples: loaded examples.json (passed through for context, not used in prompt yet)
+
+    Returns:
+        {email_id: summary_string} — empty dict if LLM is unavailable or fails.
+    """
+    if not emails or not LLAMA_URL or not re.match(r"^http://[\w.]+:\d+", LLAMA_URL):
+        return {}
+
+    # Build compact email list for the prompt — keep under context limit
+    lines = []
+    for i, em in enumerate(emails, start=1):
+        sender = (em.get("from", "") or "")[:80]
+        subject = (em.get("subject", "") or "")[:120]
+        snippet = (em.get("body_snippet", "") or em.get("snippet", ""))[:300]
+        lines.append(
+            f"  Email {i}:\n"
+            f"    From: {sender}\n"
+            f"    Subject: {subject}\n"
+            f"    Body: {snippet}"
+        )
+    email_block = "\n\n".join(lines)
+
+    system_prompt = (
+        "/no_think\n"
+        "You are an email summarizer. Below are several emails that a user just processed "
+        "(tagged or accepted). For each email, write a ONE-SENTENCE summary of the email body "
+        "content in English. Keep it concise (under 20 words). Focus on the key information: "
+        "what the email is about, any action items, or important details.\n\n"
+        "RULES:\n"
+        "  • Return ONLY valid JSON — no explanation, no markdown code fences\n"
+        '  • Format: {"summaries": {"EMAIL_ID_1": "summary 1", "EMAIL_ID_2": "summary 2", ...}}\n'
+        '  • Keys must be the email\'s id field (as strings)\n'
+        '  • If the body is too short to summarize, return a brief description based on subject/sender\n'
+    )
+
+    payload = {
+        "model": "local",
+        "max_tokens": 1024,
+        "thinking": {"type": "disabled"},
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": email_block}],
+    }
+
+    try:
+        import requests
+        r = requests.post(LLAMA_URL, json=payload, headers={"x-api-key": "local"}, timeout=60)
+        data = r.json()
+        raw_text = None
+        if isinstance(data.get("content"), list):
+            for block in data["content"]:
+                if isinstance(block, dict) and (block.get("type") == "text" or not block.get("type")):
+                    if isinstance(block.get("text"), str):
+                        raw_text = block["text"].strip()
+                        break
+        elif isinstance(data.get("choices", [{}])[0].get("message", {}).get("content"), str):
+            raw_text = data["choices"][0]["message"]["content"]
+        if not raw_text or "{" not in raw_text:
+            return {}
+        out = json.loads(raw_text)
+        summaries = out.get("summaries", {})
+        if isinstance(summaries, dict):
+            return {str(k): str(v) for k, v in summaries.items()}
+        return {}
+    except Exception:
+        return {}
+
+
 def auto_tag_email(
     msg: dict[str, any],  # type: ignore[type-arg]
     examples: list[dict] = (),     # e.g. [ {"from": "...", "action":"tag:A"} ]

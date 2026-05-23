@@ -82,6 +82,17 @@
   </div>
 </div>
 
+<!-- Summary modal (post-commit LLM body summaries) -->
+<div class="modal-overlay" id="summaryModal">
+  <div class="modal" style="max-width:600px;">
+    <h3>📝 Email Body Summaries</h3>
+    <div id="summaryList" style="max-height:400px;overflow-y:auto;margin:12px 0;"></div>
+    <div class="modal-actions">
+      <button class="btn-confirm" onclick="closeSummaryModal()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -468,12 +479,42 @@ async function commitAll() {
 
     showToast(`✓ Committed: ${data.tagged} tagged, ${data.deleted} deleted, ${data.errors} errors`, 'success');
     if (data.last_activity) updateLastActivity(data.last_activity);
+
+    // Show post-commit LLM body summaries if available
+    if (data.summaries && Object.keys(data.summaries).length > 0) {
+      showSummaryModal(data.summaries);
+    }
   } catch (err) {
     showToast('Commit failed: ' + err, 'error');
   } finally {
     btn.textContent = '✓ Commit All';
     updateStats();
   }
+}
+
+// ── Summary modal ─────────────────────────────────────────────────────────
+function showSummaryModal(summaries) {
+  const list = document.getElementById('summaryList');
+  list.innerHTML = '';
+  // Build a lookup from email_id to subject/from for display
+  const emailMap = {};
+  EMAILS.forEach(e => { emailMap[e.id] = e; });
+  for (const [emailId, summary] of Object.entries(summaries)) {
+    const em = emailMap[emailId] || {};
+    const subject = em.subject || '(unknown)';
+    const from = em.from || '';
+    const item = document.createElement('div');
+    item.style.cssText = 'padding:8px 0;border-bottom:1px solid #eee;';
+    item.innerHTML = `<div style="font-weight:600;font-size:0.85rem;margin-bottom:2px;">${escHtml(subject)}</div>`
+      + `<div style="font-size:0.75rem;color:#888;margin-bottom:4px;">${escHtml(from)}</div>`
+      + `<div style="font-size:0.82rem;color:#333;">${escHtml(summary)}</div>`;
+    list.appendChild(item);
+  }
+  document.getElementById('summaryModal').classList.add('active');
+}
+
+function closeSummaryModal() {
+  document.getElementById('summaryModal').classList.remove('active');
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────

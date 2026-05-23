@@ -111,6 +111,9 @@ Ordered by impact and what unblocks what (not conversation order).
 - [X] **[2026-05-21] "Hide Already-Processed/Committed" toggle button**
   Do instead: add a toggle button "Hide Already-Processed" in the toolbar. First click hides all rows that are `already-processed` or `committed` (adds CSS class `.row-hidden { display: none }` to `<tr>` elements). Second click shows them again (removes the class). Rows stay in the DOM and in `EMAILS`/`DECISIONS` arrays — purely visual toggle, no data removal. Button text toggles between "Hide Already-Processed" and "Show All". Hidden rows keep their original index numbers (no renumbering). State persists across background fetches — new batches re-evaluate visibility based on current toggle state.
 
+- [ ] **[2026-05-22] Redesign tag picker modal: click-to-add / ✕-to-remove list instead of ctrl+click `<select multiple>`**
+  Replace the current `<select multiple>` in the tag picker modal with a clickable list UI. Each visible label is a row with the label name on the left and an "✕" button on the left. Clicking the label name selects/adds the tag (highlights it, adds to chosen set). Clicking "✕" on a chosen tag removes it. Selected tags appear in a "Chosen" section at the top of the list (or inline with a distinct style). The filter input still filters the full label list. No ctrl+click needed — single click toggles. Update CSS and JS (`openTagModal`, `renderLabelOptions`, `confirmTagPick`, remove `handleSelectChange`/`modalSelectedTags` Set/dedup logic, remove `rebuilding` flag).
+
 - [ ] **[2026-05-22] Android app: local-LLM Gmail tagger**
   Build an Android app replicating `tagger_flask.py` features (email fetch, auto-tag review, commit) but using a local LLM (TinyLlama) for reasoning instead of a remote API. Key sub-tasks:
   - **Gmail auth on Android**: OAuth2 via Google Sign-In SDK (replaces `auth_test.py` browser flow). Scopes: `gmail.readonly` + `gmail.modify`.
@@ -134,5 +137,9 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-22] "Mark as Read" and "Delete Later" checkboxes**
   Fixed: added "Options" column with "Read" and "Del Later" checkboxes per row. `toggleMarkRead(idx, checked)` sets `state[idx].mark_read`. `toggleDeleteLater()` enforces mutual exclusion with delete action (reverts delete → pending/skipped). `deleteRow()` unchecks Del Later checkbox + state. `commitAll()` sends both booleans in payload. `api_commit()` removes UNREAD label when `mark_read=true`, skips trash when `delete_later=true`. Both fields saved to `examples.json`. State preserved across all row-action transitions.
 
-- [ ] **[2026-05-21] Post-commit LLM email body summaries**
-  Do instead: after committing, generate LLM body summaries for all non-deleted emails. In `tagger_flask.py`, return summaries in the commit JSON response and show them in a new modal. In `tagger_cli.py`, print summaries after commit stats, before exit. Add `summarize_email_bodies()` helper in `auto_tagger.py` that batches all emails into one LLM call (same `LLAMA_URL` pattern as `pick_labels_from_prompt`). Gracefully skip if LLM unavailable.
+- [x] **[2026-05-21] Post-commit LLM email body summaries**
+  Fixed:
+  - Added `summarize_email_bodies()` in `auto_tagger.py` — batches all non-deleted committed emails into one LLM call using the same `LLAMA_URL` pattern as `pick_labels_from_prompt`. Returns `{email_id: summary}` dict. Gracefully returns `{}` if LLM unavailable.
+  - `tagger_flask.py` `/commit` endpoint: after saving examples, builds summary inputs from non-deleted decisions, calls `summarize_email_bodies()`, includes `summaries` in JSON response.
+  - `templates/dashboard.html`: added `#summaryModal` overlay. `commitAll()` checks `data.summaries` and calls `showSummaryModal()` to display subject + from + summary per email. `closeSummaryModal()` dismisses.
+  - `tagger_cli.py`: after save_examples, builds summary inputs, calls `summarize_email_bodies()`, prints `📝 Body Summaries:` with `• <subject>: <summary>` per email before the commit stats block.

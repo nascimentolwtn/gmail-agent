@@ -18,7 +18,7 @@ from typing import Optional
 
 from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails
-from auto_tagger import auto_tag_email, load_examples, EmailDecision
+from auto_tagger import auto_tag_email, load_examples, EmailDecision, summarize_email_bodies
 from suggest import format_suggestion
 from review_emails import load_labels, save_examples, pick_labels
 
@@ -261,6 +261,26 @@ def run_cli() -> None:
 
         examples.extend(new_entries)
         save_examples(examples)
+
+        # Post-commit LLM body summaries for non-deleted emails
+        summary_inputs = [
+            {
+                "id": email.get("id", ""),
+                "from": email.get("from", ""),
+                "subject": email.get("subject", ""),
+                "body_snippet": email.get("body_snippet", ""),
+            }
+            for email, decision in confirmed
+            if not decision.is_delete
+        ]
+        summaries = summarize_email_bodies(summary_inputs, examples)
+        if summaries:
+            print(f"\n  📝 Body Summaries:")
+            for email, _ in confirmed:
+                eid = email.get("id", "")
+                if eid in summaries:
+                    subj = email.get("subject", "")[:60]
+                    print(f"    • {subj}: {summaries[eid]}")
 
         print(f"\n{'='*64}")
         print(f"  ✓ Commit complete")
