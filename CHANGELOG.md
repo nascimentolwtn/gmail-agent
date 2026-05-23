@@ -1,5 +1,64 @@
 # Changelog
 
+## v1.1.0 — 2026-05-22
+
+Feature release on top of v1.0.0. Adds post-commit LLM summaries, "Accept All" bulk action, "Hide Already-Processed" toggle, "Mark as Read" / "Delete Later" checkboxes, and numerous Flask dashboard bug fixes.
+
+### New Features
+
+**Post-Commit LLM Email Body Summaries (`auto_tagger.py`, `tagger_flask.py`, `tagger_cli.py`)**
+- New `summarize_email_bodies()` in `auto_tagger.py`: batches all non-deleted committed emails into a single LLM call, returns `{email_id: summary}` dict. Gracefully returns `{}` if LLM unavailable.
+- Flask `/commit` endpoint runs summaries after saving examples, includes `summaries` in the JSON response.
+- Dashboard shows a `#summaryModal` overlay post-commit with per-email subject + from + summary.
+- CLI prints `📝 Body Summaries:` with `• <subject>: <summary>` before the commit stats block.
+
+**"Accept All Pending" Bulk Action (`tagger_flask.py`, `templates/dashboard.html`)**
+- Green `✓ Accept All Pending` button in the toolbar (between "Commit All" and "Refresh").
+- Iterates all rows with `status==='pending'`, applies `delete` for delete-suggestion rows and `accepted` for all others, skips rows without suggestions.
+- Rows transition to pending-commit (orange) state; toast confirms count or reports "no pending rows".
+
+**"Hide Already-Processed/Committed" Toggle (`tagger_flask.py`, `templates/dashboard.html`)**
+- Toggle button in toolbar: first click hides all `already-processed` and `committed` rows via `.row-hidden { display: none }`; second click shows them again.
+- Rows stay in DOM and `EMAILS`/`DECISIONS` arrays — purely visual toggle, no data removal.
+- Button text toggles between "Hide Already-Processed" and "Show All".
+- Hidden rows keep original index numbers; state persists across background fetches.
+
+**"Mark as Read" and "Delete Later" Checkboxes (`tagger_flask.py`)**
+- New "Options" column with "Read" and "Del Later" checkboxes per row.
+- `toggleMarkRead(idx, checked)` sets `state[idx].mark_read`.
+- "Delete Later" enforces mutual exclusion with delete action (reverts delete → pending/skipped when checked).
+- `commitAll()` sends both booleans in the commit payload.
+- Server `api_commit()` removes UNREAD label when `mark_read=true`, skips trash when `delete_later=true`.
+- Both fields persisted to `examples.json`; state preserved across all row-action transitions.
+
+**Loading Bar + Timestamp Merged (`tagger_flask.py`)**
+- `#lastActivity` moved inside `#loadingBar` div: single row layout `[spinner] [status text...........] [timestamp right-aligned]`.
+- `loadingText` gets `flex:1` to push timestamp to the right edge.
+
+**Auto Background Fetch on Page Load (`tagger_flask.py`)**
+- `init()` calls `startBackgroundFetch()` which fetches one batch via `/api/fetch_next` with button disabled + spinner during load.
+- After completion, button re-enables; loading bar and fetch control updated.
+
+**Column Width Rebalance (`templates/dashboard.html`)**
+- Subject narrowed from 20rem → 13rem; Snippet widened from 9rem → 16rem for more body-text room.
+
+### Bug Fixes
+
+- **Suggestion column stale after tag pick**: `confirmTagPick()` now sets both `state[idx].action` and `DECISIONS[idx].action`; `acceptRow()` preserves user-set actions via `cur.action || DECISIONS[idx].action`.
+- **Tag modal selection corruption during filter rebuilds**: added `rebuilding` flag to suppress `handleSelectChange` during programmatic `<select>` rebuilds, preventing `modalSelectedTags` Set corruption.
+- **Loading bar not showing during "Load next batch"**: `fetchNextBatch()` and `startBackgroundFetch()` now call `updateLoadingBar()` immediately with "⏳ Loading emails…" before the fetch begins.
+- **Commit placeholder data**: `/commit` now resolves real `from`/`subject`/`snippet` from client-supplied fields instead of `"(web)"`.
+- **Suggestion column not updated after overriding delete with tag**: fixed via `confirmTagPick()` writing to both `state` and `DECISIONS`, plus `updateRowUI()` using `row.querySelector('.suggestion')` instead of positional `row.children[4]`.
+- **Column header renamed** to "Suggestion/Selection" to reflect dual purpose.
+
+### Pending (post-v1.1.0 backlog)
+
+- Redesign tag picker modal: click-to-add / ✕-to-remove list instead of ctrl+click `<select multiple>`
+- Android app: local-LLM Gmail tagger with Jetpack Compose + TinyLlama
+- Per-credential `examples.json` namespaced by `project_id` for multi-account safety
+
+---
+
 ## v1.0.0 — 2026-05-22
 
 First stable release. A Gmail email review and tagging toolkit with both CLI and web interfaces, backed by an LLM-powered auto-tagger that learns from your examples.
@@ -85,10 +144,12 @@ First stable release. A Gmail email review and tagging toolkit with both CLI and
 
 ### Pending (post-v1.0 backlog)
 
-- "Hide Already-Processed/Committed" toggle button
+~~"Hide Already-Processed/Committed" toggle button~~ → shipped in v1.1.0
 - Android app: local-LLM Gmail tagger with Jetpack Compose + TinyLlama
 - Per-credential `examples.json` namespaced by `project_id` for multi-account safety
-- Post-commit LLM email body summaries
+~~Post-commit LLM email body summaries~~ → shipped in v1.1.0
+~~"Accept All Pending" button~~ → shipped in v1.1.0
+~~"Mark as Read" / "Delete Later" checkboxes~~ → shipped in v1.1.0
 
 ### Dependencies
 
