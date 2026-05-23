@@ -131,11 +131,8 @@ Ordered by impact and what unblocks what (not conversation order).
   6. Update `.gitignore` to `examples_*.json` and `pending_suggestions_*.json`.
   Depends on: nothing. Unblocks safe multi-account usage.
 
-- [ ] **[2026-05-22] "Mark as Read" and "Delete Later" checkboxes**
-  Add two per-row checkboxes in the dashboard:
-  1. **Mark as Read** — when committed, email gets all tags applied AND is marked as read on Gmail (remove UNREAD label via API).
-  2. **Delete Later** — committed tags are sent to Gmail, but email stays unread (user needs to act on it, then delete later). Mutually exclusive with "delete" action: checking "Del Later" removes delete action; clicking 🗑 unchecks "Del Later".
-  Both flags (`mark_read`, `delete_later`) are included in the commit payload and saved to `examples.json` so the LLM learns from them. Plan: `/home/lw_na/.claude/plans/hashed-jingling-toast.md`.
+- [x] **[2026-05-22] "Mark as Read" and "Delete Later" checkboxes**
+  Fixed: added "Options" column with "Read" and "Del Later" checkboxes per row. `toggleMarkRead(idx, checked)` sets `state[idx].mark_read`. `toggleDeleteLater()` enforces mutual exclusion with delete action (reverts delete → pending/skipped). `deleteRow()` unchecks Del Later checkbox + state. `commitAll()` sends both booleans in payload. `api_commit()` removes UNREAD label when `mark_read=true`, skips trash when `delete_later=true`. Both fields saved to `examples.json`. State preserved across all row-action transitions.
 
 - [ ] **[2026-05-21] Post-commit LLM email body summaries**
   Do instead: after committing, generate LLM body summaries for all non-deleted emails. In `tagger_flask.py`, return summaries in the commit JSON response and show them in a new modal. In `tagger_cli.py`, print summaries after commit stats, before exit. Add `summarize_email_bodies()` helper in `auto_tagger.py` that batches all emails into one LLM call (same `LLAMA_URL` pattern as `pick_labels_from_prompt`). Gracefully skip if LLM unavailable.

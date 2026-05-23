@@ -443,6 +443,8 @@ def api_commit():
     for entry in raw_decisions:
         email_id = entry.get("email_id", "")
         action = entry.get("action")
+        mark_read = entry.get("mark_read", False)
+        delete_later = entry.get("delete_later", False)
 
         if not email_id or not action:
             errors += 1
@@ -450,7 +452,7 @@ def api_commit():
             continue
 
         try:
-            if action == "delete":
+            if action == "delete" and not delete_later:
                 service.users().messages().trash(userId="me", id=email_id).execute()
                 deleted += 1
                 details.append({"email_id": email_id, "result": "trashed"})
@@ -475,16 +477,26 @@ def api_commit():
                     errors += 1
                     details.append({"email_id": email_id, "error": "no valid label ids"})
 
+            elif delete_later:
+                details.append({"email_id": email_id, "result": "delete_later"})
+
             else:
                 errors += 1
                 details.append({"email_id": email_id, "error": "unrecognised action: " + str(action)})
+
+            if mark_read:
+                service.users().messages().modify(
+                    userId="me",
+                    id=email_id,
+                    body={"removeLabelIds": ["UNREAD"]},
+                ).execute()
 
         except Exception as exc:
             errors += 1
             details.append({"email_id": email_id, "error": str(exc)})
 
     # Save committed decisions to examples.json
-    if tagged + deleted > 0:
+    if tagged + deleted > 0 or any(e.get("delete_later") or e.get("mark_read") for e in raw_decisions):
         try:
             # Build email lookup from fetched batches
             with _fetch_lock:
@@ -526,6 +538,8 @@ def api_commit():
                     "snippet": entry.get("snippet") or em.get("body_snippet", ""),
                     "action": action,
                     "reasoning": entry.get("reasoning", ""),
+                    "mark_read": entry.get("mark_read", False),
+                    "delete_later": entry.get("delete_later", False),
                 }
                 examples.append(new_entry)
                 # Track so subsequent entries in same batch also dedup

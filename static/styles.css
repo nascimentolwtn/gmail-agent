@@ -73,6 +73,12 @@ tr.row-hidden { display: none; }
 .status-committed { color: #1a73e8; }
 .status-pending-commit { color: #e65100; }
 .status-already-processed { color: #1a73e8; font-style: italic; }
+/* Per-row checkboxes */
+.checkbox-cell { padding: 4px 6px; }
+.checkbox-cell label { display: flex; align-items: center; gap: 3px;
+                        font-size: 0.7rem; font-weight: 600; cursor: pointer;
+                        user-select: none; }
+.checkbox-cell input[type="checkbox"] { width: 14px; height: 14px; margin: 0; }
 /* Tag picker modal */
 .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
                  background: rgba(0,0,0,0.4); z-index: 100; justify-content: center;
