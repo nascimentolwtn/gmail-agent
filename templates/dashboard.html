@@ -29,7 +29,7 @@
   <button class="btn-commit" id="btnCommit" onclick="commitAll()" disabled>
     ✓ Commit All
   </button>
-  <button class="btn-accept-all" id="btnAcceptAll" onclick="acceptAllPending()">
+  <button class="btn-accept-all" id="btnAcceptAll" onclick="showAcceptAllConfirm()">
     ✓ Accept All Pending
   </button>
   <button class="btn-toggle-hidden" id="btnToggleHidden" onclick="toggleHiddenRows()">
@@ -89,6 +89,18 @@
     <div id="summaryList" style="max-height:400px;overflow-y:auto;margin:12px 0;"></div>
     <div class="modal-actions">
       <button class="btn-confirm" onclick="closeSummaryModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Accept All confirmation modal -->
+<div class="modal-overlay" id="acceptAllModal">
+  <div class="modal" style="max-width:380px;">
+    <h3>⚠️ Confirm</h3>
+    <p style="margin:8px 0 20px;color:#555;">Are you sure you want to accept all pending rows? This will accept every pending suggestion at once.</p>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAcceptAllConfirm()">Cancel</button>
+      <button class="btn-confirm" onclick="confirmAcceptAll()">Accept All</button>
     </div>
   </div>
 </div>
@@ -373,17 +385,35 @@ function confirmTagPick() {
 }
 
 // ── Accept All Pending ──────────────────────────────────────────────────
-function acceptAllPending() {
-  let count = 0;
+function showAcceptAllConfirm() {
+  // Count pending rows so the user knows the scope
+  let pendingCount = 0;
   state.forEach((s, idx) => {
-    // Only act on rows that are still pending (not already accepted/delete/tagged/skipped/committed/already-processed)
     if (s.status !== 'pending') return;
     const action = s.action || DECISIONS[idx].action;
-    if (!action) return;  // skip rows with no suggestion
+    if (action) pendingCount++;
+  });
+  if (pendingCount === 0) {
+    showToast('No pending rows to accept.', 'error');
+    return;
+  }
+  document.getElementById('acceptAllModal').classList.add('active');
+}
+
+function closeAcceptAllConfirm() {
+  document.getElementById('acceptAllModal').classList.remove('active');
+}
+
+function confirmAcceptAll() {
+  closeAcceptAllConfirm();
+  let count = 0;
+  state.forEach((s, idx) => {
+    if (s.status !== 'pending') return;
+    const action = s.action || DECISIONS[idx].action;
+    if (!action) return;
     if (action === 'delete') {
       state[idx] = { status: 'delete', action: 'delete' };
     } else {
-      // tag or any other action → accepted
       state[idx] = { status: 'accepted', action: action };
     }
     updateRowUI(idx);
@@ -391,8 +421,6 @@ function acceptAllPending() {
   });
   if (count > 0) {
     showToast(`✓ Accepted ${count} pending row${count !== 1 ? 's' : ''}`, 'success');
-  } else {
-    showToast('No pending rows to accept.', 'error');
   }
 }
 

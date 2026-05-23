@@ -108,6 +108,9 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-21] "Accept All Pending" button**
   Fixed: added `✓ Accept All Pending` button (green `#34a853`) in toolbar between "Commit All" and "Refresh". `acceptAllPending()` iterates all rows with `status==='pending'`, sets `delete` for delete suggestions and `accepted` for everything else, skips rows with no suggestion. Calls `updateRowUI()` per row so rows go to pending-commit (orange) state. Toast confirms count or "no pending rows".
 
+- [x] **[2026-05-23] Confirmation modal on "Accept All Pending"**
+  Fixed: added `#acceptAllModal` overlay with "Are you sure?" question. `showAcceptAllConfirm()` counts pending rows first; if zero, shows toast immediately. Otherwise shows modal. `confirmAcceptAll()` performs the actual accept-all after user confirms. Reuses existing `.modal-overlay`/`.modal` CSS patterns.
+
 - [X] **[2026-05-21] "Hide Already-Processed/Committed" toggle button**
   Do instead: add a toggle button "Hide Already-Processed" in the toolbar. First click hides all rows that are `already-processed` or `committed` (adds CSS class `.row-hidden { display: none }` to `<tr>` elements). Second click shows them again (removes the class). Rows stay in the DOM and in `EMAILS`/`DECISIONS` arrays — purely visual toggle, no data removal. Button text toggles between "Hide Already-Processed" and "Show All". Hidden rows keep their original index numbers (no renumbering). State persists across background fetches — new batches re-evaluate visibility based on current toggle state.
 
