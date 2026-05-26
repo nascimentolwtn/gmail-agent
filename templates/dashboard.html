@@ -756,25 +756,39 @@ async function fetchNextBatch() {
 
 // ── Init ─────────────────────────────────────────────────────────────────
 async function init() {
-  // Populate initial batch
-  addBatch(
-    INITIAL_EMAILS.map(e => e.email),
-    INITIAL_EMAILS.map(e => e.decision),
-  );
+  // Show loading screen immediately while fetching first batch
+  updateLoadingBar(0, 0, false, null, { action: 'init', ts: new Date().toISOString() }, true);
 
-  // Load cached LLM suggestions (survives refresh)
-  await loadCachedSuggestions();
+  try {
+    // Fetch first batch asynchronously
+    const resp = await fetch('/api/first_batch');
+    const data = await resp.json();
 
-  // Show initial loading state
-  fetch('/api/status')
-    .then(r => r.json())
-    .then(s => {
-      updateLoadingBar(s.loaded, s.total, s.done, s.error, s.last_activity, s.fetching);
-    })
-    .catch(() => updateLoadingBar(INITIAL_EMAILS.length, {{ total_json | safe }}, false, null, null, false));
+    if (data.error) {
+      updateLoadingBar(0, 0, true, data.error, null, false);
+      return;
+    }
 
-  // Kick off one background fetch so the user has more rows ready
-  startBackgroundFetch();
+    // Populate first batch
+    if (data.emails && data.emails.length > 0) {
+      addBatch(
+        data.emails.map(e => e.email),
+        data.emails.map(e => e.decision),
+      );
+    }
+
+    // Update loading bar with first batch progress
+    updateLoadingBar(data.loaded, data.total, data.done, null, data.last_activity, false);
+
+    // Load cached LLM suggestions (survives refresh)
+    await loadCachedSuggestions();
+
+    // Kick off one background fetch so the user has more rows ready
+    startBackgroundFetch();
+
+  } catch (err) {
+    updateLoadingBar(0, 0, true, 'Failed to load first batch: ' + err, null, false);
+  }
 }
 
 init();

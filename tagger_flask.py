@@ -244,62 +244,8 @@ def dashboard():
     examples = load_examples("examples.json")
     label_map = load_labels(service)
 
-    # Reset shared state
+    # Reset shared state for fresh session
     _reset_fetch_state()
-
-    # Fetch first batch synchronously (fast — only BATCH_SIZE emails)
-    first_batch, _, total, next_token = get_unread_emails_paginated(
-        service, page_token=None, batch_size=BATCH_SIZE
-    )
-
-    # Tag the first batch
-    first_emails_data = []
-    for email in first_batch:
-        msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
-        decision = auto_tag_email(msg_for_tagging, examples, label_map)
-        first_emails_data.append({
-            "email": {
-                "id": email["id"],
-                "from": email["from"],
-                "subject": email["subject"],
-                "body_snippet": email.get("body_snippet", "")[:150],
-            },
-            "decision": {
-                "action": decision.action,
-                "reasoning": decision.reasoning,
-            },
-        })
-
-    # Store first batch in shared state (index 0 — already rendered in page HTML)
-    with _fetch_lock:
-        _fetch_state["total"] = total
-        _fetch_state["loaded"] = len(first_batch)
-        _fetch_state["batches"].append((
-            [{
-                "id": e["id"],
-                "from": e["from"],
-                "subject": e["subject"],
-                "body_snippet": e.get("body_snippet", "")[:150],
-            } for e in first_batch],
-            [{"action": d["decision"]["action"], "reasoning": d["decision"]["reasoning"]}
-             for d in first_emails_data],
-        ))
-        # Skip batch 0 when serving /api/more — client already has it from INITIAL_EMAILS
-        _fetch_state["last_served_idx"] = 1
-
-    # Record first-batch fetch timestamp
-    with _fetch_lock:
-        _fetch_state["last_activity"] = {
-            "action": "first_batch",
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-
-    # Store next_token so /api/fetch_next can load more on user demand.
-    # Do NOT auto-start background fetch — user controls via dashboard button.
-    with _fetch_lock:
-        _fetch_state["next_page_token"] = next_token
-        _fetch_state["all_fetched"] = next_token is None
-        _fetch_state["done"] = next_token is None  # done if no more pages
 
     # Labels for the tag picker — top-N frequent first, then A–Z
     ordered_names = ordered_labels_for_picker(label_map, examples)
@@ -321,11 +267,12 @@ def dashboard():
         already_keys[composite] = opts
     already_processed = {"ids": already_ids, "keys": already_keys}
 
+    # Render page immediately with empty data — JS will fetch first batch via /api/first_batch
     return render_template(
         "dashboard.html",
-        emails_json=json.dumps(first_emails_data, ensure_ascii=False),
+        emails_json=json.dumps([], ensure_ascii=False),
         labels_json=json.dumps(label_list, ensure_ascii=False),
-        total_json=json.dumps(total),
+        total_json=json.dumps(0),
         already_processed_json=json.dumps(already_processed, ensure_ascii=False),
         top_n=top_n,
     )

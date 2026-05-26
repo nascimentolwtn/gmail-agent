@@ -121,6 +121,14 @@ Ordered by impact and what unblocks what (not conversation order).
 - [x] **[2026-05-23] Restore "Mark as Read" and "Delete Later" checkboxes when page reloads**
   Fixed: checkboxes are now saved to `examples.json` (line 541-542) but weren't being restored. Changed Python backend to pass a dict with checkbox states instead of just ID/key lists. Added `getAlreadyProcessedOptions()` JS helper to retrieve saved states. Updated `addBatch()` to restore checkboxes and disable them (already-processed rows are read-only). Checkboxes now correctly show saved state after page reload.
 
+- [x] **[2026-05-26] Dashboard first-load UX: show loading screen during initial fetch**
+  Fixed: Page now renders immediately with loading spinner + "Loading emails…" message, then asynchronously fetches first batch via new `/api/first_batch` endpoint. 
+  - Backend: Added `/api/first_batch` endpoint (moved first batch fetch logic from `dashboard()` route)
+  - Backend: Simplified `dashboard()` to render immediately with empty data, resets fetch state, still loads labels/already-processed lookups
+  - Frontend: Updated `init()` to show loading state immediately, fetch first batch via AJAX, populate table, handle errors gracefully
+  - All subsequent polling (`/api/more`, `/api/fetch_next`) works seamlessly with async first batch
+  - Improves perceived performance: page appears instantly instead of hanging during LLM processing
+
 - [ ] **[2026-05-23] Skip LLM tagging for emails already trained in examples.json — replay saved action instead**
   Currently `auto_tag_email()` is called for every email on every fetch (both `/` and `/api/fetch_next`), even if that email was already committed to `examples.json`. For already-trained emails, the LLM call is wasted and can even suggest a *different* action than what the user previously chose.
 
