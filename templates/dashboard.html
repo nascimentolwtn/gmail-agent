@@ -129,9 +129,20 @@ function escHtml(s) {
 }
 
 function isAlreadyProcessed(email) {
-  if (email.id && ALREADY_PROCESSED.ids.includes(email.id)) return true;
+  if (email.id && email.id in ALREADY_PROCESSED.ids) return true;
   const key = (email.from || '') + '||' + (email.subject || '');
-  return ALREADY_PROCESSED.keys.includes(key);
+  return key in ALREADY_PROCESSED.keys;
+}
+
+function getAlreadyProcessedOptions(email) {
+  if (email.id && email.id in ALREADY_PROCESSED.ids) {
+    return ALREADY_PROCESSED.ids[email.id];
+  }
+  const key = (email.from || '') + '||' + (email.subject || '');
+  if (key in ALREADY_PROCESSED.keys) {
+    return ALREADY_PROCESSED.keys[key];
+  }
+  return { mark_read: false, delete_later: false };
 }
 
 function formatSuggestionBadge(action) {
@@ -201,13 +212,27 @@ function addBatch(emails, decisions) {
     DECISIONS.push(decisions[i]);
     const processed = isAlreadyProcessed(email);
     const hasSuggestion = !processed && decisions[i].action !== null && decisions[i].action !== '';
+    const opts = processed ? getAlreadyProcessedOptions(email) : { mark_read: false, delete_later: false };
     state.push({
       status: processed ? 'already-processed' : (hasSuggestion ? 'pending' : 'skipped'),
       action: processed ? null : (hasSuggestion ? decisions[i].action : null),
-      mark_read: false,
-      delete_later: false,
+      mark_read: opts.mark_read,
+      delete_later: opts.delete_later,
     });
     tbody.appendChild(buildRow(idx));
+    // Restore checkbox states for already-processed rows
+    if (processed) {
+      const mrCb = document.getElementById('mr-' + idx);
+      const dlCb = document.getElementById('dl-' + idx);
+      if (mrCb) {
+        mrCb.checked = opts.mark_read;
+        mrCb.disabled = true;
+      }
+      if (dlCb) {
+        dlCb.checked = opts.delete_later;
+        dlCb.disabled = true;
+      }
+    }
   });
 
   updateStats();

@@ -156,6 +156,83 @@ def _background_fetch(service, examples: list, label_map: dict, total_expected: 
 # Routes
 # ---------------------------------------------------------------------------
 
+@app.route("/api/first_batch")
+def api_first_batch():
+    """Fetch and process the first batch of emails.
+
+    Called by JavaScript on page load to show loading screen while fetching.
+    """
+    service = get_gmail_service()
+    examples = load_examples("examples.json")
+    label_map = load_labels(service)
+
+    try:
+        # Fetch first batch
+        first_batch, _, total, next_token = get_unread_emails_paginated(
+            service, page_token=None, batch_size=BATCH_SIZE
+        )
+
+        # Tag the first batch
+        first_emails_data = []
+        for email in first_batch:
+            msg_for_tagging = {**email, "snippet": email.get("body_snippet", "")}
+            decision = auto_tag_email(msg_for_tagging, examples, label_map)
+            first_emails_data.append({
+                "email": {
+                    "id": email["id"],
+                    "from": email["from"],
+                    "subject": email["subject"],
+                    "body_snippet": email.get("body_snippet", "")[:150],
+                },
+                "decision": {
+                    "action": decision.action,
+                    "reasoning": decision.reasoning,
+                },
+            })
+
+        # Store in shared state
+        with _fetch_lock:
+            _fetch_state["total"] = total
+            _fetch_state["loaded"] = len(first_batch)
+            _fetch_state["batches"].append((
+                [{
+                    "id": e["id"],
+                    "from": e["from"],
+                    "subject": e["subject"],
+                    "body_snippet": e.get("body_snippet", "")[:150],
+                } for e in first_batch],
+                [{"action": d["decision"]["action"], "reasoning": d["decision"]["reasoning"]}
+                 for d in first_emails_data],
+            ))
+            _fetch_state["last_served_idx"] = 1
+            _fetch_state["next_page_token"] = next_token
+            _fetch_state["all_fetched"] = next_token is None
+            _fetch_state["done"] = next_token is None
+            _fetch_state["last_activity"] = {
+                "action": "first_batch",
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+
+        return jsonify({
+            "emails": first_emails_data,
+            "total": total,
+            "loaded": len(first_batch),
+            "done": next_token is None,
+            "error": None,
+            "last_activity": _fetch_state["last_activity"],
+        })
+
+    except Exception as exc:
+        return jsonify({
+            "emails": [],
+            "total": 0,
+            "loaded": 0,
+            "done": True,
+            "error": str(exc),
+            "last_activity": None,
+        }), 500
+
+
 @app.route("/")
 def dashboard():
     """Render the main dashboard with the first batch of emails.
@@ -234,14 +311,15 @@ def dashboard():
 
     # Build lookup of already-processed emails from examples.json
     # so the UI can mark them without user intervention.
-    already_ids: set[str] = set()
-    already_keys: set[str] = set()  # "from||subject" composite
+    already_ids: dict[str, dict] = {}  # id -> {mark_read, delete_later}
+    already_keys: dict[str, dict] = {}  # "from||subject" -> {mark_read, delete_later}
     for ex in examples:
+        opts = {"mark_read": ex.get("mark_read", False), "delete_later": ex.get("delete_later", False)}
         if ex.get("id"):
-            already_ids.add(ex["id"])
+            already_ids[ex["id"]] = opts
         composite = f"{ex.get('from', '')}||{ex.get('subject', '')}"
-        already_keys.add(composite)
-    already_processed = {"ids": list(already_ids), "keys": list(already_keys)}
+        already_keys[composite] = opts
+    already_processed = {"ids": already_ids, "keys": already_keys}
 
     return render_template(
         "dashboard.html",
