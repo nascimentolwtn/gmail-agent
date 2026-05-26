@@ -90,10 +90,27 @@ tr.row-hidden { display: none; }
 .modal .filter-input { width: 100%; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px;
                        font-size: 0.85rem; margin-bottom: 8px; }
 .modal .filter-input:focus { outline: none; border-color: #1a73e8; }
-.modal select { width: 100%; min-height: 300px; height: 50vh; border: 1px solid #ddd; border-radius: 6px;
-                padding: 8px; font-size: 0.85rem; margin-bottom: 12px; }
-.modal select option { padding: 3px 6px; }
-.modal select option:disabled { color: #ccc; background: #fafafa; }
+/* Tag picker list UI */
+.tag-picker-container { margin-bottom: 12px; max-height: 50vh; overflow-y: auto;
+                        border: 1px solid #ddd; border-radius: 6px; }
+.tag-section { padding: 12px; border-bottom: 1px solid #eee; }
+.tag-section:last-child { border-bottom: none; }
+.tag-section-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+                     color: #666; margin-bottom: 8px; letter-spacing: 0.5px; }
+.tag-list { display: flex; flex-direction: column; gap: 4px; }
+.tag-item { display: flex; align-items: center; padding: 8px 10px; border-radius: 4px;
+            border: 1px solid #e0e0e0; background: #fff; cursor: pointer;
+            transition: all 0.15s ease; user-select: none; }
+.tag-item:hover { background: #f5f5f5; border-color: #ccc; }
+.tag-item.selected { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8;
+                     font-weight: 500; }
+.tag-item-name { flex: 1; font-size: 0.85rem; }
+.tag-item-remove { display: none; width: 24px; height: 24px; padding: 0;
+                   background: #ea4335; color: #fff; border: none; border-radius: 3px;
+                   cursor: pointer; font-size: 0.8rem; line-height: 1;
+                   transition: background 0.15s ease; }
+.tag-item-remove:hover { background: #c5221f; }
+.tag-item.selected .tag-item-remove { display: flex; align-items: center; justify-content: center; }
 .modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .modal .modal-actions button { padding: 6px 16px; border-radius: 4px; border: 1px solid #ddd;
                                cursor: pointer; font-size: 0.85rem; }

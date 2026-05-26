@@ -4,3 +4,4 @@ pending_suggestions.json
 token.json
 credentials.json
 .vscode/settings.json
+test_venv/

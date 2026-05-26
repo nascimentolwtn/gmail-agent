@@ -129,7 +129,7 @@ Ordered by impact and what unblocks what (not conversation order).
   - All subsequent polling (`/api/more`, `/api/fetch_next`) works seamlessly with async first batch
   - Improves perceived performance: page appears instantly instead of hanging during LLM processing
 
-- [ ] **[2026-05-23] Skip LLM tagging for emails already trained in examples.json — replay saved action instead**
+- [X] **[2026-05-23] Skip LLM tagging for emails already trained in examples.json — replay saved action instead**
   Currently `auto_tag_email()` is called for every email on every fetch (both `/` and `/api/fetch_next`), even if that email was already committed to `examples.json`. For already-trained emails, the LLM call is wasted and can even suggest a *different* action than what the user previously chose.
 
   Do instead:
@@ -142,8 +142,8 @@ Ordered by impact and what unblocks what (not conversation order).
 
   Depends on: checkbox restoration (just completed). Unblocks skipping wasted LLM calls and showing correct prior actions in the suggestion column.
 
-- [ ] **[2026-05-22] Redesign tag picker modal: click-to-add / ✕-to-remove list instead of ctrl+click `<select multiple>`**
-  Replace the current `<select multiple>` in the tag picker modal with a clickable list UI. Each visible label is a row with the label name on the left and an "✕" button on the left. Clicking the label name selects/adds the tag (highlights it, adds to chosen set). Clicking "✕" on a chosen tag removes it. Selected tags appear in a "Chosen" section at the top of the list (or inline with a distinct style). The filter input still filters the full label list. No ctrl+click needed — single click toggles. Update CSS and JS (`openTagModal`, `renderLabelOptions`, `confirmTagPick`, remove `handleSelectChange`/`modalSelectedTags` Set/dedup logic, remove `rebuilding` flag).
+- [x] **[2026-05-26] Redesign tag picker modal: click-to-add / ✕-to-remove list instead of ctrl+click `<select multiple>`**
+  Fixed: replaced `<select multiple>` with clickable list UI. Each label is a `.tag-item` div with `.tag-item-name` (toggles selection on click) and `.tag-item-remove` "✕" button (removes tag). Selected tags appear in "#chosenSection" at top (hidden when empty). Filter input re-renders labels dynamically. Removed `handleSelectChange` event handler and `rebuilding` flag — now just use `modalSelectedTags` Set with click handlers. `confirmTagPick` reads from Set directly. Both "Chosen" and "All Labels" sections render via `makeTagItem()` helper. Added CSS for `.tag-picker-container`, `.tag-section`, `.tag-item`, `.tag-item.selected` (blue highlight + visible remove button), `.tag-item-remove` (red ✕ button). Test script validates all interactions: selection, removal, filtering, and modal close.
 
 - [ ] **[2026-05-22] Android app: local-LLM Gmail tagger**
   Build an Android app replicating `tagger_flask.py` features (email fetch, auto-tag review, commit) but using a local LLM (TinyLlama) for reasoning instead of a remote API. Key sub-tasks:

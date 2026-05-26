@@ -71,10 +71,21 @@
 
 <!-- Tag picker modal -->
 <div class="modal-overlay" id="tagModal">
-  <div class="modal">
+  <div class="modal" style="max-width: 500px;">
     <h3>🏷 Pick Tags</h3>
     <input type="text" class="filter-input" id="tagFilter" placeholder="Filter labels…" oninput="filterLabels(this.value)">
-    <select id="tagSelect" multiple onchange="handleSelectChange(this)"></select>
+    <div class="tag-picker-container">
+      <!-- Chosen section -->
+      <div class="tag-section" id="chosenSection" style="display: none;">
+        <div class="tag-section-title">Chosen</div>
+        <div class="tag-list" id="chosenList"></div>
+      </div>
+      <!-- All labels section -->
+      <div class="tag-section">
+        <div class="tag-section-title">All Labels</div>
+        <div class="tag-list" id="labelList"></div>
+      </div>
+    </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeTagModal()">Cancel</button>
       <button class="btn-confirm" onclick="confirmTagPick()">Confirm</button>
@@ -299,7 +310,6 @@ function updateRowUI(idx) {
 let modalRowIdx = null;
 let allLabelNames = [];   // cached for filtering
 let modalSelectedTags = new Set();  // sticky selection across filter re-renders
-let rebuilding = false;   // suppress handleSelectChange during programmatic re-renders
 const LABEL_TOP_N = {{ top_n | safe }};  // server tells us how many are "frequent"
 
 function openTagModal(idx) {
@@ -321,9 +331,11 @@ function openTagModal(idx) {
 }
 
 function renderLabelOptions(names) {
-  rebuilding = true;
-  const sel = document.getElementById('tagSelect');
-  sel.innerHTML = '';
+  const labelList = document.getElementById('labelList');
+  const chosenList = document.getElementById('chosenList');
+  const chosenSection = document.getElementById('chosenSection');
+  labelList.innerHTML = '';
+  chosenList.innerHTML = '';
 
   // Build set of which visible names are in the "top-N frequent" region
   const topNSet = new Set(allLabelNames.slice(0, LABEL_TOP_N));
@@ -331,58 +343,78 @@ function renderLabelOptions(names) {
   // Separate names into frequent vs alpha, only including names that are in the filtered list
   const visibleTopN = names.filter(n => topNSet.has(n));
   const visibleAlpha = names.filter(n => !topNSet.has(n));
+  const allVisible = [...visibleTopN, ...visibleAlpha];
+
+  // Render chosen items section
+  if (modalSelectedTags.size > 0) {
+    chosenSection.style.display = 'block';
+    Array.from(modalSelectedTags).forEach(n => {
+      if (allVisible.includes(n)) {  // only show chosen items that are visible in current filter
+        chosenList.appendChild(makeTagItem(n, true));
+      }
+    });
+  } else {
+    chosenSection.style.display = 'none';
+  }
 
   // Render frequent section
-  visibleTopN.forEach(n => sel.appendChild(makeOption(n)));
+  visibleTopN.forEach(n => labelList.appendChild(makeTagItem(n, modalSelectedTags.has(n))));
 
   // Render separator if both sections have visible items
   if (visibleTopN.length > 0 && visibleAlpha.length > 0) {
-    const sep = document.createElement('option');
-    sep.disabled = true;
-    sep.textContent = '────────────────';
-    sep.style.color = '#ccc';
-    sep.style.fontSize = '0.75rem';
-    sel.appendChild(sep);
+    const sep = document.createElement('div');
+    sep.style.cssText = 'height: 1px; background: #eee; margin: 8px 0;';
+    labelList.appendChild(sep);
   }
 
   // Render A–Z section
-  visibleAlpha.forEach(n => sel.appendChild(makeOption(n)));
-  rebuilding = false;
+  visibleAlpha.forEach(n => labelList.appendChild(makeTagItem(n, modalSelectedTags.has(n))));
 }
 
-function makeOption(n) {
-  const opt = document.createElement('option');
-  opt.value = n;
-  opt.textContent = n;
-  if (modalSelectedTags.has(n)) opt.selected = true;
-  return opt;
+function makeTagItem(name, selected) {
+  const item = document.createElement('div');
+  item.className = 'tag-item' + (selected ? ' selected' : '');
+  item.innerHTML = `
+    <span class="tag-item-name">${escHtml(name)}</span>
+    <button class="tag-item-remove" title="Remove this tag">✕</button>
+  `;
+
+  // Click on label name toggles selection
+  const nameSpan = item.querySelector('.tag-item-name');
+  nameSpan.onclick = (e) => {
+    e.stopPropagation();
+    toggleTag(name);
+    renderLabelOptions(getCurrentFilteredLabels());
+  };
+
+  // Click on ✕ removes the tag
+  const removeBtn = item.querySelector('.tag-item-remove');
+  removeBtn.onclick = (e) => {
+    e.stopPropagation();
+    modalSelectedTags.delete(name);
+    renderLabelOptions(getCurrentFilteredLabels());
+  };
+
+  return item;
 }
 
 /** Toggle a single tag in/out of the sticky Set */
-function toggleTag(name, checked) {
-  if (checked) {
-    modalSelectedTags.add(name);
-  } else {
+function toggleTag(name) {
+  if (modalSelectedTags.has(name)) {
     modalSelectedTags.delete(name);
+  } else {
+    modalSelectedTags.add(name);
   }
 }
 
-/** onchange handler: diff old Set vs new DOM selection to find what toggled */
-function handleSelectChange(sel) {
-  if (rebuilding) return;   // ignore events fired during programmatic re-render
-  const visible = new Set(sel.options.map(o => o.value));
-  const currentSelected = new Set(Array.from(sel.selectedOptions).map(o => o.value));
-  // Remove deselected items that are visible in this filter
-  modalSelectedTags.forEach(name => {
-    if (visible.has(name) && !currentSelected.has(name)) modalSelectedTags.delete(name);
-  });
-  // Add newly selected items
-  currentSelected.forEach(name => modalSelectedTags.add(name));
+function getCurrentFilteredLabels() {
+  const filterInput = document.getElementById('tagFilter');
+  const q = (filterInput.value || '').trim().toLowerCase();
+  return q ? allLabelNames.filter(n => n.toLowerCase().includes(q)) : allLabelNames;
 }
 
 function filterLabels(term) {
-  const q = term.trim().toLowerCase();
-  const filtered = q ? allLabelNames.filter(n => n.toLowerCase().includes(q)) : allLabelNames;
+  const filtered = getCurrentFilteredLabels();
   renderLabelOptions(filtered);
 }
 
@@ -396,9 +428,8 @@ function confirmTagPick() {
   const idx = modalRowIdx;
   if (idx === null) { closeTagModal(); return; }
   closeTagModal();
-  // Read directly from the DOM selectedOptions — most reliable source of truth
-  const sel = document.getElementById('tagSelect');
-  const selected = Array.from(sel.selectedOptions).map(o => o.value);
+  // Read from the modalSelectedTags Set
+  const selected = Array.from(modalSelectedTags);
   if (selected.length > 0) {
     const action = selected.map(l => 'tag:' + l);
     const cur = state[idx];
