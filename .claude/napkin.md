@@ -10,7 +10,7 @@
 
 Ordered by impact and dependencies (not conversation order).
 
-- [ ] **[2026-05-27] Skip LLM reasoning for already-trained tags**
+- [X] **[2026-05-27] Skip LLM reasoning for already-trained tags**
   Do instead: before calling LLM, check if top rule-based match has high similarity (same sender + subject). If yes, return those tags directly. Only call LLM for novel/uncertain cases (low similarity scores).
 
 - [X] **[2026-05-27] UI: Snippet truncate to 200 chars with "..." + 3-line hover hints**
