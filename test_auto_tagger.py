@@ -13,11 +13,11 @@ not just recency — so the model sees the most relevant prior decisions.
 
 import sys; sys.path.insert(0, ".")  # so imports like fetch_emails work
 
-from auto_tagger import (    # noqa: F401,F821
-    load_examples, extract_user_labels, pick_labels_from_prompt,
-    auto_tag_email, EmailDecision as Decision,
-    _example_similarity_score, _select_similar_examples,
+from auto_tagger import (    # noqa: F821
+    extract_user_labels,
+    auto_tag_email,
 )
+from mock_data import TRAINING_EXAMPLES, MOCK_EMAILS, MOCK_DECISIONS  # noqa: F401
 
 
 def run_demo(args=None):
@@ -26,60 +26,11 @@ def run_demo(args=None):
     print("  Auto-Tagger Demo (no Gmail API)")
     print("="*70)
 
-    # ----------------------------------------------------------------------
-    # Build a training set similar to real examples.json. Each entry has
-    # from, subject, body (full text), and the action that was taken.
-    # ----------------------------------------------------------------------
-    seed_examples: list[dict] = [
-        {
-            "from": "ngrok team",
-            "subject": "Your endpoint is open",
-            "body": "Hi there, your ngrok endpoint is now live and ready to accept connections. You can share the URL with your team.",
-            "action": ["tag:EngSW/LLM"],
-        },
-        {
-            "from": "Mercado Livre",
-            "subject": "Compra está a caminho",
-            "body": "Olá! Seu pedido foi enviado e chegará em 3 dias úteis. Acompanhe o rastreamento pelo app.",
-            "action": "delete",
-        },
-        {
-            "from": "99Pay",
-            "subject": "Seu Pix foi realizado",
-            "body": "Pix de R$ 150,00 enviado para João Silva com sucesso. Comprovante disponível no app.",
-            "action": "delete",
-        },
-        {
-            "from": "Filipe Newsletter",
-            "subject": "Devs ficando \"burros\"",
-            "body": "Nesta edição: como o uso excessivo de LLMs está afetando a capacidade de raciocínio dos devs. Artigos e reflexões sobre o futuro da programação.",
-            "action": ["tag:InovaçãoTecnológica"],
-        },
-        {
-            "from": "Avenue Security",
-            "subject": "Extrato mensal disponível",
-            "body": "Seu extrato de investimentos nos EUA está disponível. Acesse o portal para visualizar posições, dividendos e performance.",
-            "action": ["tag:Unibanco-Itaú/Investimentos/USA"],
-        },
-        {
-            "from": "Kidslox",
-            "subject": "Multiple PIN attempts",
-            "body": "We detected multiple incorrect PIN attempts on your child's device. Please review activity and update your security settings.",
-            "action": ["tag:Família/Crianças"],
-        },
-        {
-            "from": "Google family",
-            "subject": "Family activity report",
-            "body": "Weekly family activity report: screen time, app usage, and location history for all family members. Review in the Family Link app.",
-            "action": ["tag:Família/Crianças"],
-        },
-    ] * 7
+    # Use shared training examples, repeated for better learning
+    seed_examples = TRAINING_EXAMPLES * 5
 
-    # ----------------------------------------------------------------------
-    # Simulate a fresh inbox of unread emails to be tagged. Each tuple is:
-    #   (realistic_from, realistic_subject, body, expected_tag_or_delete)
-    # ----------------------------------------------------------------------
-    test_cases: list[tuple[str, str, str, str]] = [
+    # Test cases based on MOCK_EMAILS with expected decisions from MOCK_DECISIONS
+    test_cases: list[tuple[str, str, str, str | None]] = [
         (
             "ngrok team",
             "A couple more ngrok tips",
@@ -116,6 +67,19 @@ def run_demo(args=None):
             "Patricia used 4h 32m of screen time this week. Top apps: YouTube (2h), TikTok (1h 30m). Location history shows school and home. Review settings in Family Link.",
             "Família/Crianças",
         ),
+        # Real-world examples from production inbox
+        (
+            "LUIZ ROBERTO Nascimento <lroberto2006@gmail.com>",
+            "Descartes",
+            "Fonte: O Antagonista https://share.google/fHrXlxuIlY8tgsTWD",
+            "UniPalmares",
+        ),
+        (
+            "LUIZ ROBERTO Nascimento <lroberto2006@gmail.com>",
+            "Foto de Homenagem a Dr Edison",
+            "",
+            "Fotos",
+        ),
     ]
 
     # ----------------------------------------------------------------------
@@ -128,25 +92,34 @@ def run_demo(args=None):
     print(f"  (similarity-based selection, top-{9} examples per inference)")
     print('='*69)
 
+    # Build label map from training examples
+    label_map = extract_user_labels(seed_examples)
+
     for idx, (from_addr, subject, body, expected_label) in enumerate(test_cases, start=1):
         decision = auto_tag_email({
             "from_field": from_addr,
             "subject": subject.strip(),
             "snippet": body[:200],
             "body_snippet": body[:200],
-        }, examples=seed_examples, max_examples=9)
+        }, examples=seed_examples, label_map=dict(label_map), max_examples=9)
 
-        # decision.action is either a string ("delete") or a list (["tag:LABEL"])
+        # decision.action is either a string ("delete"), a list (["tag:LABEL"]), or None
         if isinstance(decision.action, list):
             result = decision.action[0] if decision.action else None
         else:
             result = decision.action
 
-        if expected_label == "delete":
+        # Check if result matches expected
+        if expected_label is None:
+            # Expecting no tag
+            passed = result is None
+            expected_str = "None"
+        elif expected_label == "delete":
             passed = result == "delete"
+            expected_str = "delete"
         else:
-            expected = "tag:" + expected_label
-            passed = bool(result) and (result == expected or result.lower() == expected.lower())
+            expected_str = "tag:" + expected_label
+            passed = bool(result) and (result == expected_str or result.lower() == expected_str.lower())
 
         all_passed &= passed
 
@@ -155,7 +128,7 @@ def run_demo(args=None):
         if passed:
             print(f"         Action  : {decision.action!r}")
         else:
-            print(f"         Expected: {expected!r}  Got: {decision.action!r}")
+            print(f"         Expected: {expected_str!r}  Got: {decision.action!r}")
         if decision.reasoning:
             # indent each line of the reason for readability
             for line in decision.reasoning.split("\n"):

@@ -8,55 +8,7 @@ Tests various aspects of table cell rendering:
   - Multiple rows to ensure consistent rendering
 """
 from playwright.sync_api import sync_playwright
-
-# Mock email data — reusing pattern from test_auto_tagger.py
-MOCK_EMAILS = [
-    {
-        'id': 'test1',
-        'from': 'ngrok team',
-        'subject': 'Your endpoint is open',
-        'body_snippet': 'Hi there, your ngrok endpoint is now live and ready to accept connections. You can share the URL with your team. Check the dashboard for real-time activity logs and advanced configuration options.'
-    },
-    {
-        'id': 'test2',
-        'from': 'Mercado Livre',
-        'subject': 'Compra está a caminho',
-        'body_snippet': 'Olá! Seu pedido foi enviado e chegará em 3 dias úteis. Acompanhe o rastreamento pelo app. Acesse a seção "Minhas compras" para mais detalhes e atualizações de status.'
-    },
-    {
-        'id': 'test3',
-        'from': '99Pay',
-        'subject': 'Seu Pix foi realizado',
-        'body_snippet': 'Pix de R$ 150,00 enviado para João Silva com sucesso. Comprovante disponível no app. Tempo de processamento: imediato. Seu saldo foi atualizado. Para dúvidas, acesse o suporte.'
-    },
-    {
-        'id': 'test4',
-        'from': 'Filipe Newsletter',
-        'subject': 'Devs ficando "burros" com LLMs',
-        'body_snippet': 'Nesta edição: como o uso excessivo de LLMs está afetando a capacidade de raciocínio dos devs. Artigos e reflexões sobre o futuro da programação, produtividade e educação técnica.'
-    },
-    {
-        'id': 'test5',
-        'from': 'Avenue Security',
-        'subject': 'Extrato mensal disponível — investimentos USA',
-        'body_snippet': 'Seu extrato de investimentos nos EUA está disponível. Acesse o portal para visualizar posições, dividendos, performance anual e projeções de rendimento futuro com análise detalhada.'
-    },
-    {
-        'id': 'test6',
-        'from': 'Google Family Link',
-        'subject': 'Family activity report — semana 21',
-        'body_snippet': 'Weekly family activity report: screen time, app usage, and location history for all family members. Review settings and adjust parental controls. Patricia: 4h 32m. Lucas: 3h 15m. Updates on YouTube usage patterns and recommended app limits.'
-    },
-]
-
-MOCK_DECISIONS = [
-    {'action': ['tag:EngSW/LLM'], 'reasoning': 'High-confidence match: similar to ngrok team with subject "endpoint". Using cached auto-tag decision from similar infrastructure notifications. Pattern recognized from previous ngrok deployment updates.'},
-    {'action': 'delete', 'reasoning': 'Rule-based similarity scores: Mercado_Livre=8.5, commerce_delete=7.0. Matches transactional email pattern from e-commerce platform. Not actionable (tracking info).'},
-    {'action': 'delete', 'reasoning': 'High-confidence match: similar to 99Pay with subject "Pix". Financial transaction confirmation. Pattern: payment notification → archive/delete. Not requiring user action.'},
-    {'action': ['tag:InovaçãoTecnológica'], 'reasoning': 'Pattern match: Filipe Newsletter sends tech/innovation content. Subject mentions LLM impact. Reasoning: educational content on AI trends and developer productivity.'},
-    {'action': ['tag:Unibanco-Itaú/Investimentos/USA'], 'reasoning': 'Rule-based similarity: Avenue domain=5.0, Investment statement=9.5. Financial statement matching investment portfolio tag. Monthly recurring pattern detected.'},
-    {'action': ['tag:Família/Crianças'], 'reasoning': 'High-confidence match: similar to Google Family Link reports. Family activity monitoring message. Contains child usage data (Patricia, Lucas). Tagged for family/parental records.'},
-]
+from mock_data import MOCK_EMAILS, MOCK_DECISIONS
 
 
 def generate_mock_data_js():

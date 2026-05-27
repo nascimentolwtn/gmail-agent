@@ -302,15 +302,20 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
             tags_part = emoji_match.group(1).strip()
             # Split by comma and clean up
             potential_tags = [t.strip() for t in tags_part.split(",") if t.strip()]
-            # Filter to tag: prefix or valid label names
+            # Filter to tag: prefix or valid label names (prefer tag: format)
             labels = []
             for t in potential_tags:
                 if t.lower() == "delete":
                     return ["delete"], raw_text[:100], True
-                if ":" in t:
+                if t.startswith("tag:"):
                     labels.append(t)
-                elif t and not t.startswith(("(", ")")):
-                    labels.append(t)
+                elif ":" in t:  # Allow other prefixes like "action:" but validate format
+                    if re.match(r"^[a-zA-Z][a-zA-Z0-9\-_/]*$", t.split(":", 1)[1]):
+                        labels.append(t)
+                elif t and not t.startswith(("(", ")")) and "/" not in t:  # Allow plain tags if they look valid
+                    # Plain tag without prefix - validate that it matches expected label format
+                    if re.match(r"^[a-zA-Z][a-zA-Z0-9\-_/]*$", t):
+                        labels.append("tag:" + t) if label_map and t in label_map else labels.append(t)
             if labels:
                 return labels, raw_text[:150], True
 
@@ -335,8 +340,16 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9, labe
     Delete is only returned when it is the single dominant action (no competing
     tags within the threshold), since tag-vs-delete ambiguity is better handled
     by the LLM path.
+
+    Avoids false positives by requiring additional content signals beyond sender match alone.
     """
     if not examples:
+        return None, ""
+
+    # Reject emails with empty subject and body (likely photos/attachments with no context)
+    msg_subject = (msg.get("subject", "") or "").strip()
+    msg_body = (msg.get("snippet", "") or msg.get("body_snippet", "") or "").strip()
+    if not msg_subject and not msg_body:
         return None, ""
 
     # get the top-N most similar examples (same selection as LLM path)
@@ -348,6 +361,18 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9, labe
 
     if not relevant:
         return None, ""
+
+    # Check if the most similar example has no action — if so, don't tag
+    # This prevents applying tags when the closest match is a "no-tag" example
+    if relevant:
+        best_match = max(relevant, key=lambda pair: pair[1])
+        best_ex, best_score = best_match
+        best_action = best_ex.get("action", "")
+        # If best match has empty action, don't tag (pattern says this email type shouldn't be tagged)
+        if isinstance(best_action, (list, tuple)) and len(best_action) == 0:
+            return None, ""
+        if not best_action or (isinstance(best_action, str) and not best_action.strip()):
+            return None, ""
 
     # score each individual label (not atomic action strings) by similarity
     label_scores: dict[str, float] = {}
@@ -375,8 +400,15 @@ def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9, labe
     sorted_labels = sorted(label_scores, key=label_scores.get, reverse=True)  # type: ignore[arg-type]
     top_score = label_scores[sorted_labels[0]] if sorted_labels else 0.0
 
-    # keep labels within threshold of the top score
-    keep_threshold = top_score * label_threshold
+    # Require at least content overlap (subject+body keywords) in addition to sender match
+    # to avoid false positives. Check if top examples have only sender match (score ~10-15)
+    # without subject/body overlap (which would add 3+ per keyword).
+    if msg_body:  # if there's actual body content
+        keep_threshold = top_score * label_threshold
+    else:  # no body, be more conservative with subject-only emails
+        # For emails with only subject, require higher confidence (subject keywords essential)
+        keep_threshold = top_score * max(0.8, label_threshold)
+
     top_labels = [l for l in sorted_labels if label_scores[l] >= keep_threshold]
 
     # delete wins only if it outscores all tags combined (strong signal)
@@ -497,9 +529,17 @@ def _has_high_confidence_match(msg: dict, examples: list[dict], max_examples: in
     """Check if rule-based matching has high confidence (already-trained tags).
 
     Returns (labels, reason) if confidence score > threshold, else (None, "").
-    High confidence = sender match or near-exact subject match (no need for LLM reasoning).
+    High confidence = sender + subject/body match (no need for LLM reasoning).
+
+    Requires more than just sender matching to avoid false positives on empty emails.
     """
     if not examples:
+        return None, ""
+
+    # Reject emails with empty content
+    msg_subject = (msg.get("subject", "") or "").strip()
+    msg_body = (msg.get("snippet", "") or msg.get("body_snippet", "") or "").strip()
+    if not msg_subject and not msg_body:
         return None, ""
 
     top_examples = _select_similar_examples(msg, examples, max_examples=max_examples)
@@ -511,7 +551,7 @@ def _has_high_confidence_match(msg: dict, examples: list[dict], max_examples: in
     # Find highest-scoring example
     best_ex, best_score = max(scored, key=lambda x: x[1])
 
-    # High confidence if score exceeds threshold (sender match + subject overlap)
+    # High confidence if score exceeds threshold
     if best_score >= threshold:
         # Extract the action from best match
         action = best_ex.get("action", "")
@@ -552,24 +592,9 @@ def auto_tag_email(
     # First check for high-confidence rule-based match (skip expensive LLM call)
     if examples:
         labels, reason = _has_high_confidence_match(msg, examples, max_examples)
-        if labels:
-            # Found high-confidence match, skip LLM
-            if not snippet:
-                return EmailDecision(
-                    from_field=from_field, subject=subject, snippet=snippet,
-                    action=None, reasoning="", email_id=email_id,
-                )
-            # Has labels from rule-based, build final decision below
-        else:
+        if not labels:
             # Low confidence, try LLM reasoning
-            if not examples:
-                # no training data yet — ask model to inspect first few chars only
-                labels, reason, llm_available = pick_labels_from_prompt(
-                    {"from_field": "", "subject": f"{msg.get('subject','')[:300]}", "snippet": ""},
-                    examples, label_map, max_examples,
-                )
-            else:
-                labels, reason, llm_available = pick_labels_from_prompt(msg, examples, label_map, max_examples)
+            labels, reason, llm_available = pick_labels_from_prompt(msg, examples, label_map, max_examples)
 
             # Only fall back to rule-based if LLM is truly unavailable (network error).
             if not labels and not llm_available:
