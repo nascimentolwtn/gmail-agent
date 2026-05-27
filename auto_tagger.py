@@ -493,33 +493,93 @@ def summarize_email_bodies(
         return {}
 
 
+def _has_high_confidence_match(msg: dict, examples: list[dict], max_examples: int = 9, threshold: float = 15.0) -> tuple[Optional[list[str]], str]:
+    """Check if rule-based matching has high confidence (already-trained tags).
+
+    Returns (labels, reason) if confidence score > threshold, else (None, "").
+    High confidence = sender match or near-exact subject match (no need for LLM reasoning).
+    """
+    if not examples:
+        return None, ""
+
+    top_examples = _select_similar_examples(msg, examples, max_examples=max_examples)
+    scored = [(ex, _example_similarity_score(msg, ex)) for ex in top_examples]
+
+    if not scored:
+        return None, ""
+
+    # Find highest-scoring example
+    best_ex, best_score = max(scored, key=lambda x: x[1])
+
+    # High confidence if score exceeds threshold (sender match + subject overlap)
+    if best_score >= threshold:
+        # Extract the action from best match
+        action = best_ex.get("action", "")
+        if isinstance(action, str):
+            action = [action]
+        elif not isinstance(action, list):
+            action = []
+
+        # Build reason mentioning the match
+        ex_from = best_ex.get("from", "")
+        ex_subj = best_ex.get("subject", "")
+        reason = f"High-confidence match: similar to {ex_from!r} with subject {ex_subj!r}"
+
+        return action, reason
+
+    return None, ""
+
+
 def auto_tag_email(
     msg: dict[str, any],  # type: ignore[type-arg]
     examples: list[dict] = (),     # e.g. [ {"from": "...", "action":"tag:A"} ]
     label_map: Optional[dict[str, str]] = None,
     max_examples: int = 9,
 ) -> EmailDecision:
-    """Predict and return the best tag(s) for a single email given prior decisions."""
+    """Predict and return the best tag(s) for a single email given prior decisions.
+
+    Strategy:
+    1. First check if rule-based has high-confidence match (already-trained tags) — skip LLM
+    2. Otherwise call LLM for semantic reasoning
+    3. Fall back to rule-based only if LLM unavailable
+    """
 
     from_field = msg.get("from", "")[:200]
     subject = msg.get("subject", "")[:400].replace("\n", " ")
     snippet = msg.get("snippet", "")
     email_id = msg.get("id", "")
 
-    if not examples:
+    # First check for high-confidence rule-based match (skip expensive LLM call)
+    if examples:
+        labels, reason = _has_high_confidence_match(msg, examples, max_examples)
+        if labels:
+            # Found high-confidence match, skip LLM
+            if not snippet:
+                return EmailDecision(
+                    from_field=from_field, subject=subject, snippet=snippet,
+                    action=None, reasoning="", email_id=email_id,
+                )
+            # Has labels from rule-based, build final decision below
+        else:
+            # Low confidence, try LLM reasoning
+            if not examples:
+                # no training data yet — ask model to inspect first few chars only
+                labels, reason, llm_available = pick_labels_from_prompt(
+                    {"from_field": "", "subject": f"{msg.get('subject','')[:300]}", "snippet": ""},
+                    examples, label_map, max_examples,
+                )
+            else:
+                labels, reason, llm_available = pick_labels_from_prompt(msg, examples, label_map, max_examples)
+
+            # Only fall back to rule-based if LLM is truly unavailable (network error).
+            if not labels and not llm_available:
+                labels, reason = _rule_based_tag(msg, examples, max_examples)
+    else:
         # no training data yet — ask model to inspect first few chars only
         labels, reason, llm_available = pick_labels_from_prompt(
             {"from_field": "", "subject": f"{msg.get('subject','')[:300]}", "snippet": ""},
             examples, label_map, max_examples,
         )
-    else:
-        labels, reason, llm_available = pick_labels_from_prompt(msg, examples, label_map, max_examples)
-
-    # Only fall back to rule-based if LLM is truly unavailable (network error).
-    # If LLM is available but returned None/empty, respect that decision (it may intentionally
-    # skip certain emails). Rule-based is a last resort for when no AI reasoning is possible.
-    if not labels and not llm_available:
-        labels, reason = _rule_based_tag(msg, examples, max_examples)
 
     if not labels:
         return EmailDecision(

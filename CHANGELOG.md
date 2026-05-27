@@ -24,7 +24,7 @@ Feature release on top of v1.0.0. Adds post-commit LLM summaries, "Accept All" b
 - Hidden rows keep original index numbers; state persists across background fetches.
 
 **"Mark as Read" and "Delete Later" Checkboxes (`tagger_flask.py`)**
-- New "Options" column with "Read" and "Del Later" checkboxes per row.
+- New "Options" column with "Read" and "Delete Later" checkboxes per row.
 - `toggleMarkRead(idx, checked)` sets `state[idx].mark_read`.
 - "Delete Later" enforces mutual exclusion with delete action (reverts delete → pending/skipped when checked).
 - `commitAll()` sends both booleans in the commit payload.

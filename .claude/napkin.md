@@ -10,6 +10,12 @@
 
 Ordered by impact and dependencies (not conversation order).
 
+- [ ] **[2026-05-27] Skip LLM reasoning for already-trained tags**
+  Do instead: before calling LLM, check if top rule-based match has high similarity (same sender + subject). If yes, return those tags directly. Only call LLM for novel/uncertain cases (low similarity scores).
+
+- [X] **[2026-05-27] UI: Snippet truncate to 200 chars with "..." + 3-line hover hints**
+  Do instead: (1) Truncate snippet to 197 chars + "..." = 200 total in dashboard.html buildRow(). (2) Add max-height: 4.5rem to .snippet/.reasoning CSS. (3) Hover hints via title attributes show full text. Generalized test_dashboard_rendering.py for future cell rendering checks.
+
 - [ ] **[2026-05-22] Android app: local-LLM Gmail tagger**
   Plans saved:
   - Phase 1 MVP (rule-based, no LLM): `.claude/plans/this-backlog-will-be-wise-kite.md`

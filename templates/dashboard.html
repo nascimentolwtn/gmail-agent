@@ -182,6 +182,8 @@ function buildRow(idx) {
 
   const suggestionBadge = formatSuggestionBadge(decision.action);
   const reasoning = (decision.reasoning || '').substring(0, 200);
+  const snippet = email.body_snippet || '';
+  const snippetDisplay = snippet.length > 200 ? snippet.substring(0, 197) + '...' : snippet;
 
   const isDone = state[idx] && state[idx].status === 'already-processed';
   if (isDone) tr.className = 'already-processed';
@@ -196,13 +198,13 @@ function buildRow(idx) {
     <td>${idx + 1}</td>
     <td class="from" title="${escHtml(email.from)}">${escHtml(email.from)}</td>
     <td class="subject" title="${escHtml(email.subject)}"><div>${escHtml(email.subject)}</div></td>
-    <td class="snippet" title="${escHtml(email.body_snippet)}"><div>${escHtml(email.body_snippet || '')}</div></td>
+    <td class="snippet" title="${escHtml(snippet)}"><div>${escHtml(snippetDisplay)}</div></td>
     <td class="suggestion">${suggestionBadge}</td>
     <td class="reasoning" title="${escHtml(decision.reasoning || '')}"><div>${escHtml(reasoning)}</div></td>
     <td class="actions">${actionsHtml}</td>
     <td class="checkbox-cell">
       <label><input type="checkbox" id="mr-${idx}" onchange="toggleMarkRead(${idx}, this.checked)"> Read</label>
-      <label><input type="checkbox" id="dl-${idx}" onchange="toggleDeleteLater(${idx}, this.checked)"> Del Later</label>
+      <label><input type="checkbox" id="dl-${idx}" onchange="toggleDeleteLater(${idx}, this.checked)"> Delete Later</label>
     </td>
     <td class="status status-${statusLabel}" id="status-${idx}">${statusLabel}</td>
 `;
