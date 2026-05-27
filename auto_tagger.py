@@ -147,6 +147,7 @@ def _select_similar_examples(msg: dict, examples: list[dict], max_examples: int 
 
     Scores every example on sender + subject + body similarity, then returns
     the top *max_examples* (preserving original order for stable few-shot context).
+    If no matches found, returns all examples so the LLM has *something* to learn from.
     """
     if len(examples) <= max_examples:
         return list(examples)
@@ -157,20 +158,34 @@ def _select_similar_examples(msg: dict, examples: list[dict], max_examples: int 
     # take top-N, then re-sort by original position so the LLM sees chronological order
     top = scored[:max_examples]
     top_indices = {id(ex) for ex, _ in top}
-    return [ex for ex in examples if id(ex) in top_indices]
+    selected = [ex for ex in examples if id(ex) in top_indices]
+
+    # If no matches found (all scores were 0), return all examples so LLM has context
+    # even for truly novel emails. This prevents the model from failing when it has
+    # no specific similar examples to work with.
+    if not selected or all(score == 0 for _, score in scored[:max_examples]):
+        return examples  # return all, LLM can still learn general patterns
+
+    return selected
 
 
-def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict, max_examples: int = 9) -> Optional[list[str]]:
-    """Ask a small LLM to decide the best tag(s) given current email and similar past decisions.
+def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict, max_examples: int = 9) -> tuple[Optional[list[str]], str, bool]:
+    """Ask the LLM to decide the best tag(s) given current email and similar past decisions.
+
+    Returns (labels, reasoning, llm_was_available).
+    - labels: list of tag names, ["delete"], or None
+    - reasoning: explanation of the decision
+    - llm_was_available: True if LLM responded (even with empty), False if network/connection error
 
     Few-shot examples are selected by content similarity (sender + subject + body overlap).
     The model sees what tags were applied to similar emails and *reasons* about whether
     the same tags, a subset, or none (delete) should apply to the current email.
     """
+    import re
 
     if not LLAMA_URL or not re.match(r"^http://[\w.]+:\d+", LLAMA_URL):
-        # no LLM available — just return empty, caller decides what to do with "auto" mode
-        return []
+        # no LLM configured — return unavailable signal
+        return None, "", False
 
     labels_list = ", ".join(label_map.keys())[:400] if label_map else ""  # keep prompt under model's context limit
 
@@ -194,24 +209,28 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
         )
     examples_text = "\n\n".join(few_shot_lines) if few_shot_lines else ""
 
-    # compose system prompt — explicitly tell the model to *reason*, not just copy
+    # compose system prompt — AI-guided reasoning, encourage exploring patterns beyond exact matches
     system_prompt: str = (
-        "/no_think\n"
-        "You are an email tagger. You will see the current email and several past\n"
-        "emails that are similar (same sender, similar subject/body). For each past\n"
-        "email you see what action was taken (which tags were applied, or delete).\n\n"
-        "Your job is to REASON about whether the same tags should apply to the\n"
-        "current email:\n"
-        "  - Apply ALL tags from a similar email if the content matches closely\n"
-        "  - Apply ONLY SOME tags if only part of the pattern matches\n"
-        "  - Return null (delete/skip) if the email is different enough\n\n"
-        + (f"  Similar past emails and their actions:\n{examples_text}\n\n" if examples_text else "")
+        "You are an email tagger. You will see the current email and several past emails\n"
+        "that you have previously tagged. Your job is to REASON about which tags should\n"
+        "apply to the current email, based on the patterns you see in your past decisions.\n\n"
+        "INSTRUCTIONS:\n"
+        "  1. Study the past emails and their tags — look for patterns (senders, subjects,\n"
+        "     content themes, action items, urgency, etc.)\n"
+        "  2. Evaluate the current email against those patterns\n"
+        "  3. Suggest tags that fit the patterns you discovered, even if not exact duplicates\n"
+        "  4. Consider: Could this email belong to the same category/context as a past one?\n"
+        "  5. Be creative — if the current email fits a pattern from past decisions (even\n"
+        "     distantly), suggest those tags with your reasoning\n"
+        "  6. Return null if the email is truly different from anything you've seen\n\n"
+        + (f"  Your past tagging decisions (most similar to current email):\n{examples_text}\n\n" if examples_text else "")
         + (f"  Available labels: {labels_list}\n\n" if labels_list else "")
-        + "  RULES:\n"
-        "  • Return ONLY valid JSON — no explanation, no markdown code fences\n"
-        '  • Format: {"labels":[...], "reason":"..."} OR null\n'
-        '  • The "reason" field should briefly explain WHY you chose these labels\n'
-        '    based on which past decisions influenced your choice (1-2 sentences)\n'
+        + "  FINAL OUTPUT:\n"
+        "  After your reasoning, respond with ONLY valid JSON — no explanation, no markdown:\n"
+        '  {"labels": ["tag1", "tag2"], "reason": "brief explanation (1-2 sentences)"}\n'
+        '  or {"labels": ["delete"], "reason": "brief explanation"}\n'
+        '  or null (if truly new/unrelated)\n'
+        '  The "reason" must explain which pattern you recognized and which past emails influenced your decision.\n'
     )
 
     user_body: str = ""
@@ -240,34 +259,69 @@ def pick_labels_from_prompt(result: dict, examples: list[dict], label_map: dict,
     }
 
     try:
-        import requests; r = requests.post(LLAMA_URL, json=payload, headers={"x-api-key": "local"})
+        import requests
+        r = requests.post(LLAMA_URL, json=payload, headers={"x-api-key": "local"}, timeout=60)
 
         data = r.json()  # type: ignore[union-attr]
-        raw_text = None
+        all_text = []
+
+        # Collect all content blocks (text or thinking)
         if isinstance(data.get("content"), list):
             for block in data["content"]:  # type: ignore[attr-defined]
-                if isinstance(block, dict) and (block.get("type") == "text" or not block.get("type")):
+                if isinstance(block, dict):
                     if isinstance(block.get("text"), str):
-                        raw_text = block["text"].strip()
-                        break
+                        all_text.append(block["text"])
+                    elif isinstance(block.get("thinking"), str):
+                        all_text.append(block["thinking"])
         elif isinstance(data.get("choices", [{}])[0].get("message", {}).get("content"), str):  # type: ignore[attr-defined]
-            raw_text = data["choices"][0]["message"]["content"]
-        if not raw_text or "{" not in raw_text:
-            return [], ""
+            all_text.append(data["choices"][0]["message"]["content"])
 
-        out = json.loads(raw_text)   # we expect {"labels": [...] } or null
-    except Exception:  # noqa: PERF203, try/except on LLM call — caller handles "no model" gracefully
-        return [], ""
+        raw_text = " ".join(all_text).strip() if all_text else None
 
-    if isinstance(out, list):
-        return [], ""
-    if out is None:
-        return [], ""   # signal to delete / skip instead of tag
-    if isinstance(out, dict):
-        labels = out.get("labels", [])
-        reason = out.get("reason", "")
-        return labels, reason
-    return [], ""
+        if not raw_text:
+            return None, "", False  # Empty response, fall back to rule-based
+
+        # Try to parse JSON first
+        if "{" in raw_text:
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw_text)
+            if json_match:
+                try:
+                    out = json.loads(json_match.group(0))
+                    if isinstance(out, dict):
+                        labels = out.get("labels", [])
+                        reason = out.get("reason", "")
+                        if labels or reason:
+                            return labels, reason, True
+                except json.JSONDecodeError:
+                    pass
+
+        # Fallback: parse emoji+tags format (e.g., "🏷 tag1, tag2 brief explanation")
+        # Look for emoji and extract tags after it
+        emoji_match = re.search(r'🏷\s*(.+?)(?:\s*[-–—]|\s*explanation|\s*$)', raw_text)
+        if emoji_match:
+            tags_part = emoji_match.group(1).strip()
+            # Split by comma and clean up
+            potential_tags = [t.strip() for t in tags_part.split(",") if t.strip()]
+            # Filter to tag: prefix or valid label names
+            labels = []
+            for t in potential_tags:
+                if t.lower() == "delete":
+                    return ["delete"], raw_text[:100], True
+                if ":" in t:
+                    labels.append(t)
+                elif t and not t.startswith(("(", ")")):
+                    labels.append(t)
+            if labels:
+                return labels, raw_text[:150], True
+
+        # No valid format found — fall back to rule-based
+        return None, "", False
+    except (requests.exceptions.RequestException, requests.exceptions.Timeout):
+        # Network/connection error — LLM unavailable
+        return None, "", False
+    except Exception:
+        # Parse error, timeout, or other issue — treat as unavailable
+        return None, "", False
 
 
 def _rule_based_tag(msg: dict, examples: list[dict], max_examples: int = 9, label_threshold: float = 0.5) -> tuple[Optional[list[str]], str]:
@@ -454,15 +508,17 @@ def auto_tag_email(
 
     if not examples:
         # no training data yet — ask model to inspect first few chars only
-        labels, reason = pick_labels_from_prompt(
+        labels, reason, llm_available = pick_labels_from_prompt(
             {"from_field": "", "subject": f"{msg.get('subject','')[:300]}", "snippet": ""},
             examples, label_map, max_examples,
         )
     else:
-        labels, reason = pick_labels_from_prompt(msg, examples, label_map, max_examples)
+        labels, reason, llm_available = pick_labels_from_prompt(msg, examples, label_map, max_examples)
 
-    # fall back to rule-based matching when LLM is unavailable
-    if not labels:
+    # Only fall back to rule-based if LLM is truly unavailable (network error).
+    # If LLM is available but returned None/empty, respect that decision (it may intentionally
+    # skip certain emails). Rule-based is a last resort for when no AI reasoning is possible.
+    if not labels and not llm_available:
         labels, reason = _rule_based_tag(msg, examples, max_examples)
 
     if not labels:
@@ -486,11 +542,13 @@ def auto_tag_email(
             email_id=email_id,
         )
 
+    # Strip any existing "tag:" prefix (LLM might copy it from examples) and re-add consistently
+    clean_labels = [l.lstrip("tag:").lstrip() if isinstance(l, str) else l for l in labels]
     return EmailDecision(
         from_field=from_field,
         subject=subject,
         snippet=snippet,
-        action=[f"tag:{l}" for l in labels],
+        action=[f"tag:{l}" for l in clean_labels],
         reasoning=reason,
         email_id=email_id,
     )
