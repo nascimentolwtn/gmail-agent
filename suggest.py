@@ -1,8 +1,9 @@
 import json
 import requests
+from credentials_helper import get_examples_filename
 
 LLAMA_URL = "http://localhost:11434/v1/messages"
-EXAMPLES_FILE = "examples.json"
+EXAMPLES_FILE = get_examples_filename()
 
 def load_examples():
     with open(EXAMPLES_FILE, "r") as f:

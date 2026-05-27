@@ -427,9 +427,10 @@ function closeTagModal() {
 function confirmTagPick() {
   const idx = modalRowIdx;
   if (idx === null) { closeTagModal(); return; }
-  closeTagModal();
-  // Read from the modalSelectedTags Set
+  // Read from the modalSelectedTags Set BEFORE closing modal
   const selected = Array.from(modalSelectedTags);
+  closeTagModal();
+
   if (selected.length > 0) {
     const action = selected.map(l => 'tag:' + l);
     const cur = state[idx];

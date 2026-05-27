@@ -1,6 +1,6 @@
 __pycache__/
 examples*.json
-pending_suggestions.json
+pending_suggestions*.json
 token.json
 credentials.json
 .vscode/settings.json

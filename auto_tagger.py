@@ -24,7 +24,9 @@ from fetch_emails import get_unread_emails, find_text_part  # reuse Gmail parser
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-EXAMPLES_FILE = os.getenv("AUTO_TAGGER_EXAMPLES", "examples.json")
+from credentials_helper import get_examples_filename
+
+EXAMPLES_FILE = os.getenv("AUTO_TAGGER_EXAMPLES", get_examples_filename())
 LLAMA_URL = os.getenv(
     "AUTO_TAGGER_LLM_URL", "http://localhost:11434/v1/messages"
 )  # llama.cpp default

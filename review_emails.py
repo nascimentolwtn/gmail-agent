@@ -5,8 +5,9 @@ from collections import Counter
 from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails
 from suggest import suggest_action, format_suggestion
+from credentials_helper import get_examples_filename
 
-EXAMPLES_FILE = "examples.json"
+EXAMPLES_FILE = get_examples_filename()
 
 def load_examples():
     if not os.path.exists(EXAMPLES_FILE):

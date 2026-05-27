@@ -31,8 +31,12 @@ from auth_test import get_gmail_service
 from fetch_emails import get_unread_emails_paginated
 from auto_tagger import auto_tag_email, load_examples, summarize_email_bodies
 from review_emails import load_labels, save_examples, ordered_labels_for_picker
+from credentials_helper import get_pending_suggestions_filename, migrate_examples_on_first_run
 
 app = Flask(__name__)
+
+# Migrate old examples.json to per-credential namespace on first run
+migrate_examples_on_first_run()
 
 # ---------------------------------------------------------------------------
 # Shared background-fetch state (protected by a lock)
@@ -53,7 +57,7 @@ _fetch_state: dict = {
 }
 
 BATCH_SIZE = 20              # emails per background batch
-PENDING_SUGGESTIONS_FILE = "pending_suggestions.json"
+PENDING_SUGGESTIONS_FILE = get_pending_suggestions_filename()
 
 
 def _load_pending_suggestions() -> dict:
