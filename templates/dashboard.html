@@ -8,21 +8,17 @@
 </head>
 <body>
 
-<h1>📬 Gmail Auto-Tagger</h1>
-<p class="subtitle">Review auto-suggested tags, adjust, then commit to your Gmail account.</p>
+<div class="page-header">
+  <h1>📬 Gmail Auto-Tagger</h1>
+  <p class="subtitle">Review auto-suggested tags, adjust, then commit to your Gmail account.</p>
+</div>
 
 <!-- Loading / progress bar + last activity timestamp (same row) -->
 <div class="loading-bar" id="loadingBar">
+  <button class="btn-commit" id="btnFetchNext" onclick="fetchNextBatch()" style="padding:6px 16px;font-size:0.8rem;flex-shrink:0;" disabled>Load next batch</button>
   <div class="spinner" id="spinner"></div>
   <span id="loadingText" style="flex:1;">Loading emails…</span>
   <span id="lastActivity" style="font-size:0.78rem;color:#888;flex-shrink:0;"></span>
-</div>
-
-<!-- Fetch control: load next batch on demand -->
-<div id="fetchControl" style="margin-bottom:12px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;display:none;align-items:center;gap:10px;">
-  <button class="btn-commit" id="btnFetchNext" onclick="fetchNextBatch()" style="padding:6px 16px;font-size:0.8rem;flex-shrink:0;">Load next batch</button>
-  <span id="fetchControlText" style="font-size:0.85rem;color:#555;flex:1;text-align:right;"></span>
-  <span id="fetchSpinner" class="spinner" style="display:none;width:12px;height:12px;border-width:2px;"></span>
 </div>
 
 <div class="toolbar">
@@ -35,39 +31,50 @@
   <button class="btn-toggle-hidden" id="btnToggleHidden" onclick="toggleHiddenRows()">
     Hide Already-Processed
   </button>
-  <button class="btn-refresh" onclick="location.reload()">↻ Refresh</button>
+  <button class="btn-refresh" onclick="scrollToTop()" title="Go to top">⬆</button>
+  <button class="btn-refresh" onclick="scrollToBottom()" title="Go to bottom">⬇</button>
+  <button class="btn-refresh" onclick="location.reload()" title="Refresh">↻</button>
   <span class="stats" id="stats"></span>
 </div>
 
-<table>
-  <colgroup>
-    <!-- # -->                    <col style="width:2rem">
-    <!-- From -->                 <col style="width:10rem">
-    <!-- Subject -->              <col style="width:13rem">
-    <!-- Snippet -->              <col style="width:17rem">
-    <!-- Suggestion/Selection --> <col style="width:9rem">
-    <!-- Reasoning -->            <col style="width:14rem">
-    <!-- Actions -->              <col style="width:7rem">
-    <!-- Options -->              <col style="width:5.5rem">
-    <!-- Status -->               <col style="width:5.5rem">
-  </colgroup>
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>From</th>
-      <th>Subject</th>
-      <th>Snippet</th>
-      <th>Suggestion/Selection</th>
-      <th>Reasoning</th>
-      <th>Actions</th>
-      <th>Options</th>
-      <th>Status</th>
-    </tr>
-  </thead>
-  <tbody id="emailTable">
-    <!-- rows injected by JS -->
-  </tbody>
-</table>
+<!-- Scrollable container for emails -->
+<div class="email-container">
+  <!-- Fetch control: load next batch on demand -->
+  <div id="fetchControl" style="margin-bottom:12px;padding:10px 14px;background:#fff;border-radius:6px;border:1px solid #e0e0e0;display:none;align-items:center;gap:10px;">
+    <span id="fetchControlText" style="font-size:0.85rem;color:#555;flex:1;text-align:right;"></span>
+    <span id="fetchSpinner" class="spinner" style="display:none;width:12px;height:12px;border-width:2px;"></span>
+  </div>
+
+  <table>
+    <colgroup>
+      <!-- # -->                    <col style="width:2rem">
+      <!-- From -->                 <col style="width:10rem">
+      <!-- Subject -->              <col style="width:13rem">
+      <!-- Snippet -->              <col style="width:17rem">
+      <!-- Suggestion/Selection --> <col style="width:9rem">
+      <!-- Reasoning -->            <col style="width:14rem">
+      <!-- Actions -->              <col style="width:7rem">
+      <!-- Options -->              <col style="width:5.5rem">
+      <!-- Status -->               <col style="width:5.5rem">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>From</th>
+        <th>Subject</th>
+        <th>Snippet</th>
+        <th>Suggestion/Selection</th>
+        <th>Reasoning</th>
+        <th>Actions</th>
+        <th>Options</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="emailTable">
+      <!-- rows injected by JS -->
+    </tbody>
+  </table>
+</div>
 
 <!-- Tag picker modal -->
 <div class="modal-overlay" id="tagModal">
@@ -513,6 +520,21 @@ function applyHiddenState(row) {
   }
 }
 
+// ── Scroll to top/bottom ────────────────────────────────────────────────
+function scrollToTop() {
+  const container = document.querySelector('.email-container');
+  if (container) {
+    container.scrollTop = 0;
+  }
+}
+
+function scrollToBottom() {
+  const container = document.querySelector('.email-container');
+  if (container) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
 // ── Commit ───────────────────────────────────────────────────────────────
 async function commitAll() {
   const decisions = [];
@@ -661,7 +683,7 @@ async function startBackgroundFetch() {
 
   const btn = document.getElementById('btnFetchNext');
   const spinner = document.getElementById('fetchSpinner');
-  if (btn) btn.disabled = true;
+  if (btn) { btn.disabled = true; btn.style.display = 'none'; }
   if (spinner) spinner.style.display = 'inline-block';
   updateLoadingBar(null, null, false, null, null, true);
 
@@ -677,7 +699,7 @@ async function startBackgroundFetch() {
   } catch (err) {
     showToast('Background fetch failed: ' + err, 'error');
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) { btn.disabled = false; btn.style.display = 'inline-block'; }
     if (spinner) spinner.style.display = 'none';
     bgFetchRunning = false;
   }
@@ -706,6 +728,7 @@ function updateLoadingBar(loaded, total, done, error, activity, fetching) {
   const text = document.getElementById('loadingText');
   const ctrl = document.getElementById('fetchControl');
   const ctrlText = document.getElementById('fetchControlText');
+  const btn = document.getElementById('btnFetchNext');
 
   if (error) {
     bar.className = 'loading-bar error';
@@ -723,6 +746,7 @@ function updateLoadingBar(loaded, total, done, error, activity, fetching) {
     text.textContent = `⏳ Loading emails… ${loaded} loaded so far — review while you wait!`;
     if (ctrl) {
       ctrl.style.display = 'flex';
+      if (btn) btn.disabled = true;
       if (ctrlText) ctrlText.textContent = 'fetching…';
     }
   } else {
@@ -731,6 +755,7 @@ function updateLoadingBar(loaded, total, done, error, activity, fetching) {
     text.textContent = `${loaded} email${loaded !== 1 ? 's' : ''} loaded`;
     if (ctrl) {
       ctrl.style.display = 'flex';
+      if (btn) btn.disabled = false;
       const remaining = (total > 0) ? total - loaded : '?';
       const totalStr = total > 0 ? ` of ~${total}` : '';
       ctrlText.textContent = `${loaded}${totalStr} loaded — ${remaining} remaining — click "Load next batch" to fetch more`;
@@ -778,7 +803,7 @@ async function fetchNextBatch() {
     if (data.emails && data.emails.length > 0) {
       addBatch(data.emails, data.decisions);
     }
-    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, false);
+    updateLoadingBar(data.loaded, data.total, data.done, data.error, data.last_activity, data.done ? false : false);
   } catch (err) {
     showToast('Fetch failed: ' + err, 'error');
   } finally {
