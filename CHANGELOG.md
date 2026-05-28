@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.0.0 — 2026-05-27
+
+Major release: LLM aggressive tag suggestions with mobile-friendly responsive design.
+
+### New Features
+
+**LLM-Powered Aggressive Tag Suggestions**
+- Upgraded to Qwen2.5 for semantic email classification with multi-label support
+- Smarter auto-tagging engine that learns from examples and user feedback
+- Improved suggestion accuracy and reasoning explanations
+
+**Mobile-Friendly Responsive UI**
+- Optimized layout for Android and iPhone devices (max-width: 768px)
+- Responsive button sizing: thin buttons (4px 8px padding) with larger tap targets on mobile
+- Fixed navbar and loading bar that don't obscure email content
+- Hide "Loading..." text on mobile (show spinner only) to prevent layout shifting
+- Larger emoji navigation buttons (🔼 🔽 🔄) for easier mobile interaction
+- Fixed-width toggle button for clear active/inactive state indication
+- Table optimizations: reduced padding, font sizes, and checkbox sizes for mobile
+
 ## v1.1.0 — 2026-05-22
 
 Feature release on top of v1.0.0. Adds post-commit LLM summaries, "Accept All" bulk action, "Hide Already-Processed" toggle, "Mark as Read" / "Delete Later" checkboxes, and numerous Flask dashboard bug fixes.

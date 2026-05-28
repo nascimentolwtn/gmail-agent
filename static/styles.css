@@ -6,16 +6,16 @@ h1 { margin-bottom: 4px; font-size: 1.5rem; }
 .subtitle { color: #666; margin-bottom: 20px; font-size: 0.9rem; }
 .loading-bar { position: sticky; top: 0; z-index: 11; }
 .toolbar { margin-bottom: 0; padding: 16px 20px; background: #fff; display: flex; gap: 10px; align-items: center; position: sticky; top: 0; z-index: 11; border-bottom: 1px solid #eee; }
-.toolbar button { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer;
+.toolbar button { padding: 8px 20px; border-radius: 6px; cursor: pointer;
                   font-size: 0.9rem; font-weight: 600; }
 .btn-commit { background: #1a73e8; color: #fff; }
 .btn-commit:hover { background: #1557b0; }
 .btn-commit:disabled { background: #ccc; cursor: not-allowed; }
 .btn-accept-all { background: #34a853; color: #fff; }
 .btn-accept-all:hover { background: #2d9249; }
-.btn-toggle-hidden { background: #fff; color: #555; border: 1px solid #ccc; }
+.btn-toggle-hidden { background: #fff; color: #555; border: 2px solid #999; min-width: 210px; }
 .btn-toggle-hidden:hover { background: #f0f0f0; }
-.btn-toggle-hidden.active { background: #e0e0e0; color: #333; border-color: #999; }
+.btn-toggle-hidden.active { background: #e0e0e0; color: #333; border-color: #1a73e8; }
 .btn-refresh { background: #fff; color: #333; border: 1px solid #ddd; }
 .btn-refresh:hover { background: #f0f0f0; }
 .stats { font-size: 0.85rem; color: #666; }
@@ -131,3 +131,25 @@ tr.row-hidden { display: none; }
 .toast.show { display: block; }
 .toast-success { background: #34a853; }
 .toast-error   { background: #ea4335; }
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .page-header { padding: 12px 16px 0; }
+  h1 { font-size: 1.2rem; margin-bottom: 2px; }
+  .subtitle { font-size: 0.8rem; margin-bottom: 12px; }
+  .toolbar { padding: 8px 12px; gap: 6px; flex-wrap: wrap; }
+  .toolbar button { padding: 4px 8px; font-size: 0.75rem; }
+  .toolbar .btn-refresh { font-size: 1.2rem; padding: 4px 6px; }
+  .stats { font-size: 0.7rem; }
+  .loading-bar { padding: 6px 10px 6px 12px; font-size: 0.75rem; gap: 6px; }
+  #loadingText { display: none; }
+  .email-container { padding: 8px 12px; }
+  table { border-radius: 6px; }
+  th { padding: 8px 8px; font-size: 0.7rem; }
+  td { padding: 6px 8px; font-size: 0.75rem; }
+  .actions button { padding: 3px 6px; margin: 1px; font-size: 0.7rem; }
+  .checkbox-cell label { font-size: 0.65rem; gap: 2px; }
+  .checkbox-cell input[type="checkbox"] { width: 14px; height: 18px; margin: 2px; }
+  .snippet { font-size: 0.75rem; max-height: 3rem; }
+  .reasoning { font-size: 0.7rem; max-height: 3rem; }
+  .badge { font-size: 0.65rem; padding: 1px 6px; }
+}

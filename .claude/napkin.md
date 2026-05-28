@@ -16,12 +16,11 @@ Ordered by impact and dependencies (not conversation order).
 - [X] **[2026-05-27] UI: Snippet truncate to 200 chars with "..." + 3-line hover hints**
   Do instead: (1) Truncate snippet to 197 chars + "..." = 200 total in dashboard.html buildRow(). (2) Add max-height: 4.5rem to .snippet/.reasoning CSS. (3) Hover hints via title attributes show full text. Generalized test_dashboard_rendering.py for future cell rendering checks.
 
-- [ ] **[2026-05-22] Android app: local-LLM Gmail tagger**
-  Plans saved:
+- [ ] **[2026-05-27] ⚠️ DEPRECATED: Android app: local-LLM Gmail tagger**
+  **Reason**: v2.0.0 achieves mobile-first experience via responsive web UI. No longer pursuing native Android app.
+  Plans archived (read-only):
   - Phase 1 MVP (rule-based, no LLM): `.claude/plans/this-backlog-will-be-wise-kite.md`
   - Phase 2 MediaPipe LLM integration: `.claude/plans/android-phase2-mediapipe-llm.md`
-  Blocked on: Google Cloud Console — add Android OAuth client (package `com.libuy.gmailagent` + debug SHA-1), download `google-services.json`.
-  Deploy: `./gradlew assembleDebug` + `adb install app-debug.apk`. Personal use only, no Play Store.
 
 - [X] **[2026-05-22] Per-credential `examples.json` (keyed by `project_id`)**
   Do instead: extract `project_id` from `credentials.json`; derive `examples_{project_id}.json` and `pending_suggestions_{project_id}.json`. Update all `load_examples()`/`save_examples()` calls in `auto_tagger.py`, `review_emails.py`, `tagger_flask.py`, `tagger_cli.py`, `suggest.py`. Add migration helper on first run. Update `.gitignore` to `examples_*.json`.
